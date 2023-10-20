@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 use swc_core::ecma::{
   ast::*,
-  atoms::js_word,
+  atoms::{js_word, Atom},
   visit::{noop_fold_type, Fold, FoldWith},
   transforms::testing::test,
 };
@@ -52,7 +52,7 @@ use swc_common::DUMMY_SP;
 /// 
 /// RefreshRuntime.injectIntoGlobalHook(global);
 /// global.$RefreshReg$ = () => {};
-/// global.$RefreshSig$ = RefreshRuntime.createSignatureFunctionForTransform;
+/// global.$RefreshSig$ = (typw) => () => type;
 /// global.$RefreshRuntime$ = RefreshRuntime;
 /// global.__hmr__ = {
 ///   accept: (id) => {
@@ -65,9 +65,11 @@ const REGISTER_REF: &str = "$RefreshReg$";
 const SIGNATURE_REF: &str = "$RefreshSig$";
 const RUNTIME_REF: &str = "$RefreshRuntime$";
 const TEMP_REGISTER_REF: &str = "__prevRefreshReg";
+const TEMP_SIGNATURE_REF: &str = "__prevRefreshSig";
 const SIGNATURE_FN: &str = "__s";
 
 const REACT_REFRESH_REGISTER_FN: &str = "register";
+const REACT_REFRESH_CREATE_SIGNATURE_FN: &str = "createSignatureFunctionForTransform";
 
 const HMR_REF: &str = "__hmr__";
 const HMR_ACCEPT_FN: &str = "accept";
@@ -245,15 +247,16 @@ impl ReactRefreshRuntime {
     /// Returns a statement that temporarily stores the registration function.
     /// 
     /// Code: `var __prevRefreshRef = global.$RefreshRef$;`
-    fn get_assign_temp_register_fn_stmt(&self) -> Stmt {
-        // global.$RefreshRef$
+    /// Code: `var __prevRefreshSig = global.$RefreshSig$;`
+    fn get_assign_temp_ref_fn_stmt(&self, var: Atom, prop: Atom) -> Stmt {
+        // global.$RefreshXXX$
         let access_to_global_target = Expr::Member(MemberExpr {
             span: DUMMY_SP,
             obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-            prop: MemberProp::Ident(Ident::new(js_word!(REGISTER_REF), DUMMY_SP)),
+            prop: MemberProp::Ident(Ident::new(prop, DUMMY_SP)),
         });
 
-        // var __prevRefreshRef = {access_to_global_target};
+        // var __prevRefreshXXX = {access_to_global_target};
         let assign_target_to_stmt = Stmt::Decl(Decl::Var(Box::new(VarDecl {
             span: DUMMY_SP,
             kind: VarDeclKind::Var,
@@ -262,7 +265,7 @@ impl ReactRefreshRuntime {
                 VarDeclarator {
                     span: DUMMY_SP,
                     name: Pat::Ident(BindingIdent {
-                        id: Ident::new(js_word!(TEMP_REGISTER_REF), DUMMY_SP),
+                        id: Ident::new(var, DUMMY_SP),
                         type_ann: None,
                     }),
                     definite: false,
@@ -368,6 +371,41 @@ impl ReactRefreshRuntime {
                     right: Box::new(define_register_fn_expr),
                 }),
             ),
+        })
+    }
+
+    /// Returns a statement that override the signature function variable.
+    ///
+    /// Code: `global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;`
+    fn get_assign_signature_fn_stmt(&self) -> Stmt {
+        // global.$RefreshRuntime$.createSignatureFunctionForTransform
+        let access_create_signature_fn_expr = Expr::Member(MemberExpr {
+            span: DUMMY_SP,
+            obj: Box::new(Expr::Member(MemberExpr {
+                span: DUMMY_SP,
+                obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
+                prop: MemberProp::Ident(
+                    Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
+                ),
+            })),
+            prop: MemberProp::Ident(Ident::new(js_word!(REACT_REFRESH_CREATE_SIGNATURE_FN), DUMMY_SP)),
+        });
+
+        // global.$RefreshSig$ = {access_create_signature_fn_expr};
+        Stmt::Expr(ExprStmt {
+            span: DUMMY_SP,
+            expr: Box::new(Expr::Assign(AssignExpr {
+                span: DUMMY_SP,
+                op: AssignOp::Assign,
+                left: PatOrExpr::Expr(Box::new(Expr::Member(MemberExpr {
+                    span: DUMMY_SP,
+                    obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
+                    prop: MemberProp::Ident(
+                        Ident::new(js_word!(SIGNATURE_REF), DUMMY_SP),
+                    ),
+                }))),
+                right: Box::new(access_create_signature_fn_expr),
+            })),
         })
     }
 
@@ -525,12 +563,14 @@ impl ReactRefreshRuntime {
     /// Returns a statement that restore the registration function from temporarily variable.
     ///
     /// Code: `global.$RefreshReg$ = __prevRefreshReg;`
-    fn get_restore_register_fn_stmt(&self) -> Stmt {
+    /// Code: `global.$RefreshSig$ = __prevRefreshSeg;`
+    ///        prop                  var
+    fn get_restore_ref_fn_stmt(&self, prop: Atom, var: Atom) -> Stmt {
         // global.$RefreshReg$
         let access_to_global_target = Expr::Member(MemberExpr {
             span: DUMMY_SP,
             obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-            prop: MemberProp::Ident(Ident::new(js_word!(REGISTER_REF), DUMMY_SP)),
+            prop: MemberProp::Ident(Ident::new(prop, DUMMY_SP)),
         });
 
         // {access_to_global_target} = __prevRefreshReg;
@@ -540,7 +580,7 @@ impl ReactRefreshRuntime {
                 span: DUMMY_SP,
                 op: AssignOp::Assign,
                 left: PatOrExpr::Expr(Box::new(access_to_global_target)) ,
-                right: Box::new(Expr::Ident(Ident::new(js_word!(TEMP_REGISTER_REF), DUMMY_SP))),
+                right: Box::new(Expr::Ident(Ident::new(var, DUMMY_SP))),
             })),
         })
     }
@@ -609,11 +649,21 @@ impl Fold for ReactRefreshRuntime {
         // If some React component defined, insert the code below at the top.
         //
         // var __prevRefreshReg = global.$RefreshReg$;
+        // var __prevRefreshSig = global.$RefreshSig$;
+        // global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
         // var __s = global.$RefreshSig$();
         if has_defined_component {
-            self.module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_register_fn_stmt()));
-            self.module_body.insert(1, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
-            self.module_body.insert(2, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
+            self.module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
+                js_word!(TEMP_REGISTER_REF),
+                js_word!(REGISTER_REF),
+            )));
+            self.module_body.insert(1, ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
+                js_word!(TEMP_SIGNATURE_REF),
+                js_word!(SIGNATURE_REF),
+            )));
+            self.module_body.insert(2, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
+            self.module_body.insert(3, ModuleItem::Stmt(self.get_assign_signature_fn_stmt()));
+            self.module_body.insert(4, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
         }
 
         // Append the code below at the bottom.
@@ -636,8 +686,16 @@ impl Fold for ReactRefreshRuntime {
         // Finally, restore original react-refresh util function references.
         //
         // global.$RefreshReg$ = __prevRefreshReg;
+        // global.$RefreshSig$ = __prevRefreshSig;
         if has_defined_component {
-            self.module_body.push(ModuleItem::Stmt(self.get_restore_register_fn_stmt()));
+            self.module_body.push(ModuleItem::Stmt(self.get_restore_ref_fn_stmt(
+                js_word!(REGISTER_REF),
+                js_word!(TEMP_REGISTER_REF)
+            )));
+            self.module_body.push(ModuleItem::Stmt(self.get_restore_ref_fn_stmt(
+                js_word!(SIGNATURE_REF),
+                js_word!(TEMP_SIGNATURE_REF),
+            )));
         }
 
         Module {
@@ -665,10 +723,13 @@ test!(
     };
     "#,
     // Output
-    r#"var __prevRefreshReg = global.$RefreshReg$;
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = function(type, id) {
         global.$RefreshRuntime$.register(type, id);
     };
+    global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
     var __s = global.$RefreshSig$();
     const Component = ()=>{
         __s();
@@ -677,7 +738,9 @@ test!(
     __s(Component, "test:Component", false);
     global.$RefreshReg$(Component, "test:Component");
     global.__hmr__("test:Component").accept();
-    global.$RefreshReg$ = __prevRefreshReg;"#
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
 );
 
 test!(
@@ -719,9 +782,11 @@ test!(
     // Output
     r#"
     var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = function(type, id) {
         global.$RefreshRuntime$.register(type, id);
     };
+    global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
     var __s = global.$RefreshSig$();
     const Component = ()=>{
         __s();
@@ -732,5 +797,6 @@ test!(
     global.$RefreshReg$(Component, "test:Component");
     global.__hmr__("test:Component").accept();
     global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
     "#
 );
