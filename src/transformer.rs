@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use swc_core::ecma::{
   ast::*,
   atoms::js_word,
@@ -177,9 +178,27 @@ impl Fold for ReactRefreshRuntimeComponent {
 /// And then add signature, register components and accept for HMR.
 pub struct ReactRefreshRuntime {
     module_id: String,
+    module_body: Vec<ModuleItem>,
+    component_list: Vec<ComponentMeta>,
+    component_names: HashSet<String>,
 }
 
 impl ReactRefreshRuntime {
+    fn default(module_id: String) -> ReactRefreshRuntime {
+        ReactRefreshRuntime {
+            module_id,
+            module_body: Vec::new(),
+            component_list: Vec::new(),
+            component_names: HashSet::new(),
+        }
+    }
+
+    fn initialize_before_fold_module(&mut self) {
+        self.module_body.clear();
+        self.component_list.clear();
+        self.component_names.clear();
+    }
+
     /// Get symbol name from `Ident`
     fn get_name_from_ident(&self, ident: &Ident) -> String {
         ident.sym.to_string()
@@ -207,20 +226,15 @@ impl ReactRefreshRuntime {
     /// Fold with ReactRefreshRuntimeComponent if it is valid React component.
     /// 
     /// Returns `isFolded`
-    fn fold_if_react_component(
-        &self,
-        module: &ModuleItem,
-        ident: &Ident,
-        component_list: &mut Vec<ComponentMeta>,
-        module_body: &mut Vec<ModuleItem>
-    ) -> bool {
+    fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = self.get_name_from_ident(ident);
 
-        if self.is_react_component_name(&component_name) {
+        if self.is_react_component_name(&component_name) && !self.component_names.contains(&component_name) {
             let fold_component_inner = &mut ReactRefreshRuntimeComponent::default();
-            module_body.push(module.clone().fold_children_with(fold_component_inner));
-            component_list.push(ComponentMeta {
-                name: component_name,
+            self.module_body.push(module.clone().fold_children_with(fold_component_inner));
+            self.component_names.insert(component_name.to_owned());
+            self.component_list.push(ComponentMeta {
+                name: component_name.to_owned(),
                 has_custom_hook_call: fold_component_inner.has_custom_hook_call,
             });
             return true;
@@ -536,12 +550,11 @@ impl Fold for ReactRefreshRuntime {
     noop_fold_type!();
 
     fn fold_module(&mut self, module: Module) -> Module {
-        let mut new_module_body: Vec<ModuleItem> = Vec::new();
-        let mut component_list: Vec<ComponentMeta> = Vec::new();
-        let mut component_folded: bool;
+        self.initialize_before_fold_module();
+        let mut is_folded: bool;
 
         for module in module.body.iter() {
-            component_folded = false;
+            is_folded = false;
 
             // 1. Find variable declare statements and check it is React component.
             //    - `const MyComponent = () => {};`
@@ -558,21 +571,11 @@ impl Fold for ReactRefreshRuntime {
             if let ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl))) = module {
                 for decl in var_decl.decls.iter() {
                     if let Pat::Ident(ident) = &decl.name {
-                        component_folded = self.fold_if_react_component(
-                            module,
-                            ident,
-                            &mut component_list,
-                            &mut new_module_body
-                        );
+                        is_folded = self.fold_if_react_component(module, ident);
                     }
                 }
             } else if let ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) = module {
-                component_folded = self.fold_if_react_component(
-                    module,
-                    &fn_decl.ident,
-                    &mut component_list,
-                    &mut new_module_body
-                );
+                is_folded = self.fold_if_react_component(module, &fn_decl.ident);
             } else if let ModuleItem::ModuleDecl(module_decl) = module {
                 if let Some(named_export) = module_decl.as_export_decl() {
                     match &named_export.decl {
@@ -580,52 +583,37 @@ impl Fold for ReactRefreshRuntime {
                             if let Some(named_var_ident) = named_var_export.decls.get(0).and_then(
                                 |d| d.name.as_ident(),
                             ) {
-                                component_folded = self.fold_if_react_component(
-                                    module,
-                                    &named_var_ident.id,
-                                    &mut component_list,
-                                    &mut new_module_body
-                                );
+                                is_folded = self.fold_if_react_component(module, &named_var_ident.id);
                             }
                         }
                         Decl::Fn(named_fn_export) => {
-                            component_folded = self.fold_if_react_component(
-                                module,
-                                &named_fn_export.ident,
-                                &mut component_list,
-                                &mut new_module_body
-                            );
+                            is_folded = self.fold_if_react_component(module, &named_fn_export.ident);
                         }
                         _ => (),
                     }
                 } else if let Some(default_export) = module_decl.as_export_default_expr() {
                     if let Some(default_export_ident) = default_export.expr.as_ident() {
-                        component_folded = self.fold_if_react_component(
-                            module,
-                            &default_export_ident,
-                            &mut component_list,
-                            &mut new_module_body
-                        );
+                        is_folded = self.fold_if_react_component(module, &default_export_ident);
                     }
                 }
             }
 
             // 3. If React component not found, use original statement.
-            if !component_folded {
-                new_module_body.push(module.clone());
+            if !is_folded {
+                self.module_body.push(module.clone());
             }
         }
 
-        let has_defined_component = component_list.len() > 0;
+        let has_defined_component = self.component_names.len() > 0;
 
         // If some React component defined, insert the code below at the top.
         //
         // var __prevRefreshReg = global.$RefreshReg$;
         // var __s = global.$RefreshSig$();
         if has_defined_component {
-            new_module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_register_fn_stmt()));
-            new_module_body.insert(1, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
-            new_module_body.insert(2, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
+            self.module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_register_fn_stmt()));
+            self.module_body.insert(1, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
+            self.module_body.insert(2, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
         }
 
         // Append the code below at the bottom.
@@ -636,31 +624,31 @@ impl Fold for ReactRefreshRuntime {
         // _s(Component, "module_id");
         // global.$RefreshReg$(Component, "module_id");
         // global.__hmr__("module_id_here").accept();
-        for meta in component_list.iter() {
-            new_module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
+        for meta in self.component_list.iter() {
+            self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
                 &meta.name,
                 meta.has_custom_hook_call,
             )));
-            new_module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(&meta.name)));
-            new_module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(&meta.name)));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(&meta.name)));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(&meta.name)));
         }
 
         // Finally, restore original react-refresh util function references.
         //
         // global.$RefreshReg$ = __prevRefreshReg;
         if has_defined_component {
-            new_module_body.push(ModuleItem::Stmt(self.get_restore_register_fn_stmt()));
+            self.module_body.push(ModuleItem::Stmt(self.get_restore_register_fn_stmt()));
         }
 
         Module {
-            body: new_module_body,
+            body: self.module_body.to_owned(),
             ..module
         }
     }
 }
 
 pub fn react_refresh(module_id: String) -> ReactRefreshRuntime {
-    ReactRefreshRuntime { module_id }
+    ReactRefreshRuntime::default(module_id)
 }
 
 test!(
@@ -668,10 +656,15 @@ test!(
         jsx: true,
         ..Default::default()
     }),
-    |_| ReactRefreshRuntime { module_id: String::from("test") },
+    |_| ReactRefreshRuntime::default(String::from("test")),
     arrow_function_component,
     // Input codes
-    r#"const Component = () => {};"#,
+    r#"
+    const Component = () => {
+        return <div>{'Hello World'}</div>;
+    };
+    "#,
+    // Output
     r#"var __prevRefreshReg = global.$RefreshReg$;
     global.$RefreshReg$ = function(type, id) {
         global.register.$RefreshRuntime$(type, id);
@@ -679,9 +672,65 @@ test!(
     var __s = global.$RefreshSig$();
     const Component = ()=>{
         __s();
+        return <div>{'Hello World'}</div>;
     };
     __s(Component, "test:Component", false);
     global.$RefreshReg$(Component, "test:Component");
     global.__hmr__("test:Component").accept();
     global.$RefreshReg$ = __prevRefreshReg;"#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    arrow_function_component_default_export,
+    // Input codes
+    r#"
+    export default () => {
+        return <div>{'Hello World'}</div>;
+    };
+    "#,
+    // Output
+    r#"
+    export default (()=>{
+        return <div>{'Hello World'}</div>;
+    });
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    arrow_function_component_default_export_from_var,
+    // Input codes
+    r#"
+    const Component = () => {
+        return <div>{'Hello World'}</div>;
+    };
+
+    export default Component;
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    global.$RefreshReg$ = function(type, id) {
+        global.register.$RefreshRuntime$(type, id);
+    };
+    var __s = global.$RefreshSig$();
+    const Component = ()=>{
+        __s();
+        return <div>{'Hello World'}</div>;
+    };
+    export default Component;
+    __s(Component, "test:Component", false);
+    global.$RefreshReg$(Component, "test:Component");
+    global.__hmr__("test:Component").accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    "#
 );
