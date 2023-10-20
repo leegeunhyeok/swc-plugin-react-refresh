@@ -1,24 +1,20 @@
-<div>
-
 # swc-plugin-react-refresh
 
 Swc plugin implementation of [react-refresh/babel](https://www.npmjs.com/package/react-refresh)
-
-</div>
 
 > [!IMPORTANT]
 > A plugin for developing bundlers
 > and this plugin is experimental.
 
 - [x] Explore React components in module
-  - [x] Function expression
-  - [x] Arrow function expression
+  - [x] Function expressions
+  - [x] Arrow function expressions
   - [x] Class declarations
   - [x] Import statements(default, named)
   - [x] Export statements(default, named, named with declare)
 - [x] Get component name from AST
 - [x] Parse hook calls from AST
-- [ ] Parse HoC(High Order Component) expressions (`React.memo`, `React.forwardedRef`, and Custom HoC)
+- [ ] Parse HoC(High Order Component) expressions(`React.memo`, `React.forwardedRef`, and Custom HoC)
 - [ ] Generate signature key based on the order of hook call expressions
 
 ## Setup
@@ -33,14 +29,13 @@ Add plugin to your swc options.
 
 ```ts
 import { transform } from '@swc/core';
-import reactRefreshPlugin from 'swc-plugin-react-refresh';
 
 await transform(code, {
   jsc: {
     experimental: {
       plugins: [
         // Add plugin here
-        [reactRefreshPlugin, { skipEnvCheck: true }],
+        ['swc-plugin-react-refresh', { skipEnvCheck: true }],
       ],
     },
   },
