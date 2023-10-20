@@ -3,6 +3,7 @@
   "version": "0.1.0-alpha.0",
   "description": "Swc plugin implementation of react-refresh/babel",
   "author": "Geunhyeok LEE <dev.ghlee@gmail.com>",
+  "homepage": "https://github.com/leegeunhyeok/swc-plugin-react-refresh#readme",
   "license": "MIT",
   "keywords": ["swc-plugin", "react", "react-refresh"],
   "main": "target/wasm32-wasi/release/swc_plugin_react_refresh.wasm",
@@ -16,5 +17,12 @@
     "package.json",
     "target/wasm32-wasi/release/swc_plugin_react_refresh.wasm"
   ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/leegeunhyeok/swc-plugin-react-refresh.git"
+  },
+  "bugs": {
+    "url": "https://github.com/leegeunhyeok/swc-plugin-react-refresh/issues"
+  },
   "preferUnplugged": true
 }
