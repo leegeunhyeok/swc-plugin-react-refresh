@@ -9,6 +9,8 @@ use swc_core::plugin::{
     metadata::TransformPluginMetadataContextKind,
 };
 mod transformer;
+mod visitor;
+mod utils;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

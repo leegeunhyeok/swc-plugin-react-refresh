@@ -2,10 +2,11 @@ use std::collections::HashSet;
 use swc_core::ecma::{
   ast::*,
   atoms::{js_word, Atom},
-  visit::{noop_fold_type, Fold, FoldWith},
+  visit::{noop_fold_type, VisitWith, Fold, FoldWith},
   transforms::testing::test,
 };
 use swc_common::DUMMY_SP;
+use crate::{utils::{get_name_from_ident, is_react_component_name}, visitor};
 
 /// Before using this plugin, you should inject runtime code below.
 /// 
@@ -200,6 +201,7 @@ pub struct ReactRefreshRuntime {
     module_body: Vec<ModuleItem>,
     component_list: Vec<ComponentMeta>,
     component_names: HashSet<String>,
+    black_list: HashSet<String>,
 }
 
 impl ReactRefreshRuntime {
@@ -209,6 +211,7 @@ impl ReactRefreshRuntime {
             module_body: Vec::new(),
             component_list: Vec::new(),
             component_names: HashSet::new(),
+            black_list: HashSet::new(),
         }
     }
 
@@ -216,11 +219,13 @@ impl ReactRefreshRuntime {
         self.module_body.clear();
         self.component_list.clear();
         self.component_names.clear();
+        self.black_list.clear();
     }
 
-    /// Get symbol name from `Ident`
-    fn get_name_from_ident(&self, ident: &Ident) -> String {
-        ident.sym.to_string()
+    fn prepare_before_fold_module(&mut self, module: &Module) {
+        let mut collector = visitor::black_list_collector();
+        module.visit_with(&mut collector);
+        self.black_list = collector.get_black_list();
     }
 
     /// Returns id
@@ -231,24 +236,17 @@ impl ReactRefreshRuntime {
         owned_string
     }
 
-    /// Check provided name is valid React component name.
-    /// 
-    /// Returns `true` if name starts with capitalize.
-    /// 
-    /// - MyComponent: `true`
-    /// - myComponent: `false`
-    fn is_react_component_name(&self, name: &String) -> bool {
-        // starts with capital character
-        name.chars().nth(0).unwrap().is_uppercase()
-    }
-
     /// Fold with ReactRefreshRuntimeComponent if it is valid React component.
     /// 
     /// Returns `isFolded`
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
-        let component_name = self.get_name_from_ident(ident);
+        let component_name = get_name_from_ident(ident);
 
-        if self.is_react_component_name(&component_name) && !self.component_names.contains(&component_name) {
+        if !is_react_component_name(&component_name) {
+            return false;
+        }
+
+        if !(self.component_names.contains(&component_name) || self.black_list.contains(&component_name)) {
             let fold_component_inner = &mut ReactRefreshRuntimeComponent::default();
             self.module_body.push(module.to_owned().fold_children_with(fold_component_inner));
             self.component_names.insert(component_name.to_owned());
@@ -563,6 +561,7 @@ impl Fold for ReactRefreshRuntime {
 
     fn fold_module(&mut self, module: Module) -> Module {
         self.initialize_before_fold_module();
+        self.prepare_before_fold_module(&module);
         let mut is_folded: bool;
 
         for module in module.body.iter() {
@@ -766,5 +765,72 @@ test!(
     global.__hmr__(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    external_component_default_import,
+    // Input codes
+    r#"
+    import RootComponent from 'app/core';
+
+    export { RootComponent };
+    "#,
+    // Output
+    r#"
+    import RootComponent from 'app/core';
+
+    export { RootComponent };
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    external_component_named_import,
+    // Input codes
+    r#"
+    import { Button, Text } from 'app/design-system';
+
+    export { Button, Text };
+    "#,
+    // Output
+    r#"
+    import { Button, Text } from 'app/design-system';
+
+    export { Button, Text };
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    class_component,
+    // Input codes
+    r#"
+    class ClassComponent extends React.Component {
+        render () {
+            return <div>{'Hello, World'}</div>;
+        }
+    }
+    "#,
+    // Output
+    r#"
+    class ClassComponent extends React.Component {
+        render () {
+            return <div>{'Hello, World'}</div>;
+        }
+    }
     "#
 );
