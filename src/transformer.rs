@@ -293,10 +293,10 @@ impl ReactRefreshRuntime {
                         span: DUMMY_SP,
                         obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
                         prop: MemberProp::Ident(
-                            Ident::new(js_word!(REACT_REFRESH_REGISTER_FN), DUMMY_SP),
+                            Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
                         ),
                     })),
-                    prop: MemberProp::Ident(Ident::new(js_word!(RUNTIME_REF), DUMMY_SP)),
+                    prop: MemberProp::Ident(Ident::new(js_word!(REACT_REFRESH_REGISTER_FN), DUMMY_SP)),
                 })),
             ),
             args: vec![
@@ -667,7 +667,7 @@ test!(
     // Output
     r#"var __prevRefreshReg = global.$RefreshReg$;
     global.$RefreshReg$ = function(type, id) {
-        global.register.$RefreshRuntime$(type, id);
+        global.$RefreshRuntime$.register(type, id);
     };
     var __s = global.$RefreshSig$();
     const Component = ()=>{
@@ -720,7 +720,7 @@ test!(
     r#"
     var __prevRefreshReg = global.$RefreshReg$;
     global.$RefreshReg$ = function(type, id) {
-        global.register.$RefreshRuntime$(type, id);
+        global.$RefreshRuntime$.register(type, id);
     };
     var __s = global.$RefreshSig$();
     const Component = ()=>{
