@@ -52,13 +52,13 @@ use swc_common::DUMMY_SP;
 /// 
 /// RefreshRuntime.injectIntoGlobalHook(global);
 /// global.$RefreshReg$ = () => {};
-/// global.$RefreshSig$ = (typw) => () => type;
+/// global.$RefreshSig$ = () => (type) => type;
 /// global.$RefreshRuntime$ = RefreshRuntime;
-/// global.__hmr__ = {
-///   accept: (id) => {
-///     return createHmrContext(id);
+/// global.__hmr__ = (id) => ({
+///   accept: () => {
+///     return createHmrContext(id).accept();
 ///   },
-/// };
+/// });
 /// ```
 const GLOBAL: &str = "global";
 const REGISTER_REF: &str = "$RefreshReg$";
@@ -683,7 +683,7 @@ impl Fold for ReactRefreshRuntime {
             self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(&meta.name)));
         }
 
-        // Finally, restore original react-refresh util function references.
+        // Finally, restore original react-refresh functions.
         //
         // global.$RefreshReg$ = __prevRefreshReg;
         // global.$RefreshSig$ = __prevRefreshSig;
