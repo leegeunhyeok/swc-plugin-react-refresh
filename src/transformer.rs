@@ -50,13 +50,31 @@ use swc_common::DUMMY_SP;
 ///   return hot;
 /// };
 /// 
+/// const isReactRefreshBoundary = (type) => {
+///   return RefreshRuntime.isLikelyComponentType(type) && !type.prototype.isReactComponent;
+/// }
+/// 
 /// RefreshRuntime.injectIntoGlobalHook(global);
 /// global.$RefreshReg$ = () => {};
 /// global.$RefreshSig$ = () => (type) => type;
-/// global.$RefreshRuntime$ = RefreshRuntime;
-/// global.__hmr__ = (id) => ({
+/// global.$RefreshRuntime$ = {
+///   isReactRefreshBoundary,
+///   getRegisterFunction: () => {
+///     return (type, id) => {
+///       if (isReactRefreshBoundary(type)) return;
+///       return RefreshRuntime.register(type, id);
+///     };
+///   },
+///   getCreateSignatureFunction: () => {
+///     return () => (type, id, forceReset, getCustomHooks) => {
+///       if (isReactRefreshBoundary(type)) return;
+///       return RefreshRuntime.createSignatureFunctionForTransform(type, id, forceReset, getCustomHooks);
+///     };
+///   },
+/// };
+/// global.__hmr__ = (type, id) => ({
 ///   accept: () => {
-///     return createHmrContext(id).accept();
+///     if (isReactRefreshBoundary(type)) createHmrContext(id).accept();
 ///   },
 /// });
 /// ```
@@ -64,12 +82,11 @@ const GLOBAL: &str = "global";
 const REGISTER_REF: &str = "$RefreshReg$";
 const SIGNATURE_REF: &str = "$RefreshSig$";
 const RUNTIME_REF: &str = "$RefreshRuntime$";
+const RUNTIME_GET_REGISTER_FN: &str = "getRegisterFunction";
+const RUNTIME_GET_SIGNATURE_FN: &str = "getCreateSignatureFunction";
 const TEMP_REGISTER_REF: &str = "__prevRefreshReg";
 const TEMP_SIGNATURE_REF: &str = "__prevRefreshSig";
 const SIGNATURE_FN: &str = "__s";
-
-const REACT_REFRESH_REGISTER_FN: &str = "register";
-const REACT_REFRESH_CREATE_SIGNATURE_FN: &str = "createSignatureFunctionForTransform";
 
 const HMR_REF: &str = "__hmr__";
 const HMR_ACCEPT_FN: &str = "accept";
@@ -208,7 +225,7 @@ impl ReactRefreshRuntime {
 
     /// Returns id
     fn get_id(&self, identifier: &String) -> String {
-        let mut owned_string = self.module_id.clone();
+        let mut owned_string = self.module_id.to_owned();
         owned_string.push_str(":");
         owned_string.push_str(identifier.as_str());
         owned_string
@@ -233,7 +250,7 @@ impl ReactRefreshRuntime {
 
         if self.is_react_component_name(&component_name) && !self.component_names.contains(&component_name) {
             let fold_component_inner = &mut ReactRefreshRuntimeComponent::default();
-            self.module_body.push(module.clone().fold_children_with(fold_component_inner));
+            self.module_body.push(module.to_owned().fold_children_with(fold_component_inner));
             self.component_names.insert(component_name.to_owned());
             self.component_list.push(ComponentMeta {
                 name: component_name.to_owned(),
@@ -277,17 +294,12 @@ impl ReactRefreshRuntime {
         assign_target_to_stmt
     }
 
-    /// Returns a statement that define register function and override.
+    /// Returns a statement that create register function and override.
     ///
-    /// Code:
-    /// ```js
-    /// global.$RefreshRuntime$ = function (type, id) {
-    ///   global.$RefreshRuntime$.register(type, id);
-    /// }
-    /// ```
+    /// Code: `global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();`
     fn get_assign_register_fn_stmt(&self) -> Stmt {
-        // global.$RefreshRuntime$.register(type, id);
-        let call_register_expr = Expr::Call(CallExpr {
+        // global.$RefreshRuntime$.getRegisterFunction();
+        let call_get_register_expr = Expr::Call(CallExpr {
             span: DUMMY_SP,
             callee: Callee::Expr(
                 Box::new(Expr::Member(MemberExpr {
@@ -299,60 +311,11 @@ impl ReactRefreshRuntime {
                             Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
                         ),
                     })),
-                    prop: MemberProp::Ident(Ident::new(js_word!(REACT_REFRESH_REGISTER_FN), DUMMY_SP)),
+                    prop: MemberProp::Ident(Ident::new(js_word!(RUNTIME_GET_REGISTER_FN), DUMMY_SP)),
                 })),
             ),
-            args: vec![
-                ExprOrSpread {
-                    expr: Box::new(Expr::Ident(Ident::new(js_word!("type"), DUMMY_SP))),
-                    spread: None,
-                },
-                ExprOrSpread {
-                    expr: Box::new(Expr::Ident(Ident::new(js_word!("id"), DUMMY_SP))),
-                    spread: None,
-                },
-            ],
+            args: vec![],
             type_args: None,
-        });
-
-        // function(type, id) {
-        //   global.$RefreshRuntime$.register(type, id);
-        // }
-        let define_register_fn_expr = Expr::Fn(FnExpr {
-            ident: None,
-            function: Box::new(Function {
-                span: DUMMY_SP,
-                params: vec![
-                    Param {
-                        span: DUMMY_SP,
-                        decorators: vec![],
-                        pat: Pat::Expr(Box::new(Expr::Ident(
-                            Ident::new(js_word!("type"), DUMMY_SP),
-                        ))),
-                    },
-                    Param {
-                        span: DUMMY_SP,
-                        decorators: vec![],
-                        pat: Pat::Expr(Box::new(Expr::Ident(
-                            Ident::new(js_word!("id"), DUMMY_SP),
-                        ))),
-                    },
-                ],
-                body: Some(BlockStmt {
-                    span: DUMMY_SP,
-                    stmts: vec![
-                        Stmt::Expr(ExprStmt {
-                            span: DUMMY_SP,
-                            expr: Box::new(call_register_expr),
-                        }),
-                    ],
-                }),
-                decorators: vec![],
-                is_generator: false,
-                is_async: false,
-                type_params: None,
-                return_type: None,
-            }),
         });
 
         Stmt::Expr(ExprStmt {
@@ -368,7 +331,7 @@ impl ReactRefreshRuntime {
                             prop: MemberProp::Ident(Ident::new(js_word!(REGISTER_REF), DUMMY_SP)),
                         }),
                     )),
-                    right: Box::new(define_register_fn_expr),
+                    right: Box::new(call_get_register_expr),
                 }),
             ),
         })
@@ -376,22 +339,27 @@ impl ReactRefreshRuntime {
 
     /// Returns a statement that override the signature function variable.
     ///
-    /// Code: `global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;`
+    /// Code: `global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();`
     fn get_assign_signature_fn_stmt(&self) -> Stmt {
-        // global.$RefreshRuntime$.createSignatureFunctionForTransform
-        let access_create_signature_fn_expr = Expr::Member(MemberExpr {
+        // global.$RefreshRuntime$.createSignatureFunctionForTransform()
+        let call_get_create_signature_fn_expr = Expr::Call(CallExpr {
             span: DUMMY_SP,
-            obj: Box::new(Expr::Member(MemberExpr {
+            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
                 span: DUMMY_SP,
-                obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                prop: MemberProp::Ident(
-                    Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
-                ),
-            })),
-            prop: MemberProp::Ident(Ident::new(js_word!(REACT_REFRESH_CREATE_SIGNATURE_FN), DUMMY_SP)),
+                obj: Box::new(Expr::Member(MemberExpr {
+                    span: DUMMY_SP,
+                    obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
+                    prop: MemberProp::Ident(
+                        Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
+                    ),
+                })),
+                prop: MemberProp::Ident(Ident::new(js_word!(RUNTIME_GET_SIGNATURE_FN), DUMMY_SP)),
+            }))),
+            args: vec![],
+            type_args: None,
         });
 
-        // global.$RefreshSig$ = {access_create_signature_fn_expr};
+        // global.$RefreshSig$ = {call_get_create_signature_fn_expr};
         Stmt::Expr(ExprStmt {
             span: DUMMY_SP,
             expr: Box::new(Expr::Assign(AssignExpr {
@@ -404,7 +372,7 @@ impl ReactRefreshRuntime {
                         Ident::new(js_word!(SIGNATURE_REF), DUMMY_SP),
                     ),
                 }))),
-                right: Box::new(access_create_signature_fn_expr),
+                right: Box::new(call_get_create_signature_fn_expr),
             })),
         })
     }
@@ -519,9 +487,9 @@ impl ReactRefreshRuntime {
 
     /// Returns a statement that call the HMR accept method.
     ///
-    /// Code: `global.__hmr__("module_id").accept();`
+    /// Code: `global.__hmr__(Component, "module_id").accept();`
     fn get_call_accept_stmt(&self, component_name: &String) -> Stmt {
-        // global.__hmr__("module_id")
+        // global.__hmr__(Component, "module_id")
         let call_hmr_expr = Expr::Call(CallExpr {
             span: DUMMY_SP,
             callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
@@ -530,6 +498,10 @@ impl ReactRefreshRuntime {
                 prop: MemberProp::Ident(Ident::new(js_word!(HMR_REF), DUMMY_SP)),
             }))),
             args: vec![
+                ExprOrSpread {
+                    expr: Box::new(Expr::Ident(Ident::new(component_name.to_owned().into(), DUMMY_SP))),
+                    spread: None,
+                },
                 ExprOrSpread {
                     expr: Box::new(Expr::Lit(Lit::Str(Str {
                         span: DUMMY_SP,
@@ -640,7 +612,7 @@ impl Fold for ReactRefreshRuntime {
 
             // 3. If React component not found, use original statement.
             if !is_folded {
-                self.module_body.push(module.clone());
+                self.module_body.push(module.to_owned());
             }
         }
 
@@ -718,7 +690,7 @@ test!(
     arrow_function_component,
     // Input codes
     r#"
-    const Component = () => {
+    const ArrowComponent = () => {
         return <div>{'Hello World'}</div>;
     };
     "#,
@@ -726,18 +698,16 @@ test!(
     r#"
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
-    global.$RefreshReg$ = function(type, id) {
-        global.$RefreshRuntime$.register(type, id);
-    };
-    global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
     var __s = global.$RefreshSig$();
-    const Component = ()=>{
+    const ArrowComponent = ()=>{
         __s();
         return <div>{'Hello World'}</div>;
     };
-    __s(Component, "test:Component", false);
-    global.$RefreshReg$(Component, "test:Component");
-    global.__hmr__("test:Component").accept();
+    __s(ArrowComponent, "test:ArrowComponent", false);
+    global.$RefreshReg$(ArrowComponent, "test:ArrowComponent");
+    global.__hmr__(ArrowComponent, "test:ArrowComponent").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -773,29 +743,27 @@ test!(
     arrow_function_component_default_export_from_var,
     // Input codes
     r#"
-    const Component = () => {
+    const ArrowComponentDefaultFromVar = () => {
         return <div>{'Hello World'}</div>;
     };
 
-    export default Component;
+    export default ArrowComponentDefaultFromVar;
     "#,
     // Output
     r#"
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
-    global.$RefreshReg$ = function(type, id) {
-        global.$RefreshRuntime$.register(type, id);
-    };
-    global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
     var __s = global.$RefreshSig$();
-    const Component = ()=>{
+    const ArrowComponentDefaultFromVar = ()=>{
         __s();
         return <div>{'Hello World'}</div>;
     };
-    export default Component;
-    __s(Component, "test:Component", false);
-    global.$RefreshReg$(Component, "test:Component");
-    global.__hmr__("test:Component").accept();
+    export default ArrowComponentDefaultFromVar;
+    __s(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar", false);
+    global.$RefreshReg$(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar");
+    global.__hmr__(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
