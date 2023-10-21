@@ -181,7 +181,6 @@ impl ReactRefreshRuntime {
             let fold_result = module.to_owned().fold_children_with(fold_component_inner);
 
             if fold_component_inner.component_folded {
-                println!("fold {:#?}", fold_result);
                 self.module_body.push(fold_result);
                 self.component_names.insert(component_name.to_owned());
                 self.component_list.push(ComponentMeta {
