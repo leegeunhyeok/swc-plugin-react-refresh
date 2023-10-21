@@ -5,8 +5,21 @@ use swc_core::ecma::{
   visit::{noop_fold_type, VisitWith, Fold, FoldWith},
   transforms::testing::test,
 };
-use swc_common::DUMMY_SP;
-use crate::{utils::{get_name_from_ident, is_react_component_name}, visitor};
+use crate::{utils::{
+    ident,
+    ident_expr,
+    ident_str_expr,
+    str_expr,
+    bool_expr,
+    arg_expr,
+    obj_prop_expr,
+    assign_expr,
+    call_expr,
+    decl_var_and_assign_stmt,
+    to_stmt,
+    get_name_from_ident,
+    is_react_component_name,
+}, visitor};
 
 const GLOBAL: &str = "global";
 const REGISTER_REF: &str = "$RefreshReg$";
@@ -54,20 +67,7 @@ impl ReactRefreshRuntimeComponent {
     ///
     /// Code: `__s();`
     fn get_signature_call_stmt(&self) -> Stmt {
-        // __s()
-        let call_signature_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(
-                Expr::Ident(Ident::new(js_word!(SIGNATURE_FN), DUMMY_SP)))
-            ),
-            args: vec![],
-            type_args: None,
-        });
-
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(call_signature_expr),
-        })
+        to_stmt(call_expr(ident_expr(js_word!(SIGNATURE_FN)), vec![]))
     }
 
     fn find_custom_hook_call_from_stmt(&self, stmt: &Stmt) -> bool {
@@ -89,18 +89,17 @@ impl ReactRefreshRuntimeComponent {
     }
 
     fn is_custom_hook_call(&self, call_expr: &CallExpr) -> bool {
+        let mut is_custom_hook = false;
         if let Some(callee_expr) = call_expr.callee.as_expr() {
-            // Check if this expression is hook like a `React.useXXX()`
+            // Check if this expression is hook like a `React.useXXX()`.
             if let Some(ident) = callee_expr.as_ident() {
                 let hook_name = ident.sym.to_string();
-                if BUILTIN_HOOKS.contains(&hook_name.as_str()) {
-                    return false;
-                } else if hook_name.starts_with("use") {
-                    return true;
+                if !BUILTIN_HOOKS.contains(&hook_name.as_str()) && hook_name.starts_with("use") {
+                    is_custom_hook = true;
                 }
             }
         }
-        return false;
+        is_custom_hook
     }
 }
 
@@ -158,7 +157,7 @@ impl ReactRefreshRuntime {
     }
 
     /// Returns id
-    fn get_id(&self, identifier: &String) -> String {
+    fn get_id(&self, identifier: String) -> String {
         let mut owned_string = self.module_id.to_owned();
         owned_string.push_str(":");
         owned_string.push_str(identifier.as_str());
@@ -167,7 +166,7 @@ impl ReactRefreshRuntime {
 
     /// Fold with ReactRefreshRuntimeComponent if it is valid React component.
     /// 
-    /// Returns `isFolded`
+    /// Returns `true` when folded and otherwise returns `false`
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
 
@@ -192,116 +191,41 @@ impl ReactRefreshRuntime {
     /// 
     /// Code: `var __prevRefreshRef = global.$RefreshRef$;`
     /// Code: `var __prevRefreshSig = global.$RefreshSig$;`
-    fn get_assign_temp_ref_fn_stmt(&self, var: Atom, prop: Atom) -> Stmt {
-        // global.$RefreshXXX$
-        let access_to_global_target = Expr::Member(MemberExpr {
-            span: DUMMY_SP,
-            obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-            prop: MemberProp::Ident(Ident::new(prop, DUMMY_SP)),
-        });
-
-        // var __prevRefreshXXX = {access_to_global_target};
-        let assign_target_to_stmt = Stmt::Decl(Decl::Var(Box::new(VarDecl {
-            span: DUMMY_SP,
-            kind: VarDeclKind::Var,
-            declare: false,
-            decls: vec![
-                VarDeclarator {
-                    span: DUMMY_SP,
-                    name: Pat::Ident(BindingIdent {
-                        id: Ident::new(var, DUMMY_SP),
-                        type_ann: None,
-                    }),
-                    definite: false,
-                    init: Some(Box::new(access_to_global_target)),
-                },
-            ],
-        })));
-
-        assign_target_to_stmt
+    fn get_assign_temp_ref_fn_stmt(&self, var_name: Atom, prop: Atom) -> Stmt {
+        decl_var_and_assign_stmt(
+            ident(var_name),
+            obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(prop)),
+        )
     }
 
     /// Returns a statement that create register function and override.
     ///
     /// Code: `global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();`
     fn get_assign_register_fn_stmt(&self) -> Stmt {
-        // global.$RefreshRuntime$.getRegisterFunction();
-        let call_get_register_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(
-                Box::new(Expr::Member(MemberExpr {
-                    span: DUMMY_SP,
-                    obj: Box::new(Expr::Member(MemberExpr {
-                        span: DUMMY_SP,
-                        obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                        prop: MemberProp::Ident(
-                            Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
-                        ),
-                    })),
-                    prop: MemberProp::Ident(Ident::new(js_word!(RUNTIME_GET_REGISTER_FN), DUMMY_SP)),
-                })),
+        let left = obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(REGISTER_REF)));
+        let right = call_expr(
+            obj_prop_expr(
+                obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(RUNTIME_REF))),
+                ident(js_word!(RUNTIME_GET_REGISTER_FN)),
             ),
-            args: vec![],
-            type_args: None,
-        });
-
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(
-                Expr::Assign(AssignExpr {
-                    span: DUMMY_SP,
-                    op: AssignOp::Assign,
-                    left: PatOrExpr::Expr(Box::new(
-                        Expr::Member(MemberExpr {
-                            span: DUMMY_SP,
-                            obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                            prop: MemberProp::Ident(Ident::new(js_word!(REGISTER_REF), DUMMY_SP)),
-                        }),
-                    )),
-                    right: Box::new(call_get_register_expr),
-                }),
-            ),
-        })
+            vec![],
+        );
+        to_stmt(assign_expr(left, right))
     }
 
     /// Returns a statement that override the signature function variable.
     ///
     /// Code: `global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();`
     fn get_assign_signature_fn_stmt(&self) -> Stmt {
-        // global.$RefreshRuntime$.createSignatureFunctionForTransform()
-        let call_get_create_signature_fn_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                span: DUMMY_SP,
-                obj: Box::new(Expr::Member(MemberExpr {
-                    span: DUMMY_SP,
-                    obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                    prop: MemberProp::Ident(
-                        Ident::new(js_word!(RUNTIME_REF), DUMMY_SP),
-                    ),
-                })),
-                prop: MemberProp::Ident(Ident::new(js_word!(RUNTIME_GET_SIGNATURE_FN), DUMMY_SP)),
-            }))),
-            args: vec![],
-            type_args: None,
-        });
-
-        // global.$RefreshSig$ = {call_get_create_signature_fn_expr};
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(Expr::Assign(AssignExpr {
-                span: DUMMY_SP,
-                op: AssignOp::Assign,
-                left: PatOrExpr::Expr(Box::new(Expr::Member(MemberExpr {
-                    span: DUMMY_SP,
-                    obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                    prop: MemberProp::Ident(
-                        Ident::new(js_word!(SIGNATURE_REF), DUMMY_SP),
-                    ),
-                }))),
-                right: Box::new(call_get_create_signature_fn_expr),
-            })),
-        })
+        let left = obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(SIGNATURE_REF)));
+        let right = call_expr(
+            obj_prop_expr(
+                obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(RUNTIME_REF))),
+                ident(js_word!(RUNTIME_GET_SIGNATURE_FN)),
+            ),
+            vec![],
+        );
+        to_stmt(assign_expr(left, right))
     }
 
     /// Returns a statement that declares the signature function variable
@@ -309,179 +233,73 @@ impl ReactRefreshRuntime {
     ///
     /// Code: `var __s = global.$RefreshSig$();`
     fn get_create_signature_fn_stmt(&self) -> Stmt {
-        // global.$RefreshSig$()
-        let call_signature_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                span: DUMMY_SP,
-                obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                prop: MemberProp::Ident(Ident::new(js_word!(SIGNATURE_REF), DUMMY_SP)),
-            }))),
-            args: vec![],
-            type_args: None,
-        });
-
-        // var __s = {call_signature_expr};
-        Stmt::Decl(Decl::Var(Box::new(VarDecl {
-            span: DUMMY_SP,
-            kind: VarDeclKind::Var,
-            declare: false,
-            decls: vec![
-                VarDeclarator {
-                    span: DUMMY_SP,
-                    name: Pat::Ident(BindingIdent {
-                        id: Ident::new(js_word!(SIGNATURE_FN), DUMMY_SP),
-                        type_ann: None,
-                    }),
-                    definite: false,
-                    init: Some(Box::new(call_signature_expr)),
-                },
-            ],
-        })))
+        decl_var_and_assign_stmt(
+            ident(js_word!(SIGNATURE_FN)),
+            call_expr(
+                obj_prop_expr(
+                    ident_expr(js_word!(GLOBAL)),
+                    ident(js_word!(SIGNATURE_REF)),
+                ),
+                vec![],
+            ),
+        )
     }
 
     /// Returns a statement that call the created signature function.
     ///
     /// Code: `__s(Component, "module_id", has_custom_hook_call);`
-    fn get_call_signature_fn_stmt(&self, component_name: &String, has_custom_hook_call: bool) -> Stmt {
-        // __s(Component, "module_id", {has_custom_hook_call})
-        let call_signature_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(
-                Expr::Ident(Ident::new(js_word!(SIGNATURE_FN), DUMMY_SP))),
-            ),
-            args: vec![
-                ExprOrSpread {
-                    expr: Box::new(Expr::Ident(Ident::new(component_name.to_owned().into(), DUMMY_SP))),
-                    spread: None,
-                },
-                ExprOrSpread {
-                    expr: Box::new(Expr::Lit(Lit::Str(Str {
-                        span: DUMMY_SP,
-                        value: self.get_id(component_name).into(),
-                        raw: None,
-                    }))),
-                    spread: None,
-                },
-                ExprOrSpread {
-                    expr: Box::new(Expr::Lit(Lit::Bool(has_custom_hook_call.into()))),
-                    spread: None,
-                },
+    fn get_call_signature_fn_stmt(&self, component_name: String, has_custom_hook_call: bool) -> Stmt {
+        to_stmt(call_expr(
+            ident_expr(js_word!(SIGNATURE_FN)),
+            vec![
+                arg_expr(ident_str_expr(&component_name)),
+                arg_expr(str_expr(&self.get_id(component_name))),
+                arg_expr(bool_expr(has_custom_hook_call)),
             ],
-            type_args: None,
-        });
-
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(call_signature_expr),
-        })
+        ))
     }
 
     /// Returns a statement that call the register function.
     ///
     /// Code: `global.$RefreshRef$(Component, "module_id");`
-    fn get_call_register_fn_stmt(&self, component_name: &String) -> Stmt {
-        // global.$RefreshRef$(Component, "module_id")
-        let call_register_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                span: DUMMY_SP,
-                obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                prop: MemberProp::Ident(Ident::new(js_word!(REGISTER_REF), DUMMY_SP)),
-            }))),
-            args: vec![
-                ExprOrSpread {
-                    expr: Box::new(Expr::Ident(Ident::new(component_name.to_owned().into(), DUMMY_SP))),
-                    spread: None,
-                },
-                ExprOrSpread {
-                    expr: Box::new(Expr::Lit(Lit::Str(Str {
-                        span: DUMMY_SP,
-                        value: self.get_id(component_name).into(),
-                        raw: None,
-                    }))),
-                    spread: None,
-                },
+    fn get_call_register_fn_stmt(&self, component_name: String) -> Stmt {
+        to_stmt(call_expr(
+            obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(REGISTER_REF))),
+            vec![
+                arg_expr(ident_str_expr(&component_name)),
+                arg_expr(str_expr(&self.get_id(component_name))),
             ],
-            type_args: None,
-        });
-
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(call_register_expr),
-        })
+        ))
     }
 
     /// Returns a statement that call the HMR accept method.
     ///
     /// Code: `global.__hmr__(Component, "module_id").accept();`
-    fn get_call_accept_stmt(&self, component_name: &String) -> Stmt {
-        // global.__hmr__(Component, "module_id")
-        let call_hmr_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                span: DUMMY_SP,
-                obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-                prop: MemberProp::Ident(Ident::new(js_word!(HMR_REF), DUMMY_SP)),
-            }))),
-            args: vec![
-                ExprOrSpread {
-                    expr: Box::new(Expr::Ident(Ident::new(component_name.to_owned().into(), DUMMY_SP))),
-                    spread: None,
-                },
-                ExprOrSpread {
-                    expr: Box::new(Expr::Lit(Lit::Str(Str {
-                        span: DUMMY_SP,
-                        value: self.get_id(component_name).into(),
-                        raw: None,
-                    }))),
-                    spread: None,
-                },
-            ],
-            type_args: None,
-        });
-
-        // {call_hmr_expr}.accept()
-        let call_accept_expr = Expr::Call(CallExpr {
-            span: DUMMY_SP,
-            callee: Callee::Expr(Box::new(Expr::Member(MemberExpr {
-                span: DUMMY_SP,
-                obj: Box::new(call_hmr_expr),
-                prop: MemberProp::Ident(Ident::new(js_word!(HMR_ACCEPT_FN), DUMMY_SP)),
-            }))),
-            args: vec![],
-            type_args: None,
-        });
-
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(call_accept_expr),
-        })
+    fn get_call_accept_stmt(&self, component_name: String) -> Stmt {
+        to_stmt(call_expr(
+            obj_prop_expr(
+                call_expr(
+                    obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(HMR_REF))),
+                    vec![
+                        arg_expr(ident_str_expr(&component_name)),
+                        arg_expr(str_expr(&self.get_id(component_name))),
+                    ],
+                ),
+                ident(js_word!(HMR_ACCEPT_FN)),
+            ),
+            vec![],
+        ))
     }
 
     /// Returns a statement that restore the registration function from temporarily variable.
     ///
     /// Code: `global.$RefreshReg$ = __prevRefreshReg;`
     /// Code: `global.$RefreshSig$ = __prevRefreshSeg;`
-    ///        prop                  var
-    fn get_restore_ref_fn_stmt(&self, prop: Atom, var: Atom) -> Stmt {
-        // global.$RefreshReg$
-        let access_to_global_target = Expr::Member(MemberExpr {
-            span: DUMMY_SP,
-            obj: Box::new(Expr::Ident(Ident::new(js_word!(GLOBAL), DUMMY_SP))),
-            prop: MemberProp::Ident(Ident::new(prop, DUMMY_SP)),
-        });
-
-        // {access_to_global_target} = __prevRefreshReg;
-        Stmt::Expr(ExprStmt {
-            span: DUMMY_SP,
-            expr: Box::new(Expr::Assign(AssignExpr {
-                span: DUMMY_SP,
-                op: AssignOp::Assign,
-                left: PatOrExpr::Expr(Box::new(access_to_global_target)) ,
-                right: Box::new(Expr::Ident(Ident::new(var, DUMMY_SP))),
-            })),
-        })
+    fn get_restore_ref_fn_stmt(&self, prop: Atom, var_name: Atom) -> Stmt {
+        to_stmt(assign_expr(
+            obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(prop)),
+            ident_expr(var_name),
+        ))
     }
 }
 
@@ -538,7 +356,7 @@ impl Fold for ReactRefreshRuntime {
                 }
             }
 
-            // 3. If React component not found, use original statement.
+            // 4. If React component not found, use original statement.
             if !is_folded {
                 self.module_body.push(module.to_owned());
             }
@@ -576,11 +394,11 @@ impl Fold for ReactRefreshRuntime {
         // global.__hmr__("module_id_here").accept();
         for meta in self.component_list.iter() {
             self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
-                &meta.name,
+                meta.name.to_owned(),
                 meta.has_custom_hook_call,
             )));
-            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(&meta.name)));
-            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(&meta.name)));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(meta.name.to_owned())));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(meta.name.to_owned())));
         }
 
         // Finally, restore original react-refresh functions.
