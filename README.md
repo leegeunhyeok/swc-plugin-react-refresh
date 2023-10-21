@@ -63,8 +63,11 @@ Finally, inject runtime code at the top of bundled source.
 ```js
 const RefreshRuntime = require('react-refresh/runtime');
 
-const hmrContext = {};
-const createHmrContext = (id) => {
+
+const ModuleMap = typeof WeakMap === 'function' ? WeakMap : Map;
+const modules = new ModuleMap();
+
+const createHmrContext = (type) => {
   const state = {
     timeout: null,
     accepted: false,
@@ -92,11 +95,10 @@ const createHmrContext = (id) => {
     },
   };
 
-  if (hmrContext[id]) {
-    hmrContext[id].dispose();
+  if (modules.has(type)) {
+    modules.get(type).dispose();
   }
-
-  hmrContext[id] = hot;
+  modules.set(type) = hot;
 
   return hot;
 };
@@ -110,27 +112,25 @@ RefreshRuntime.injectIntoGlobalHook(global);
 global.$RefreshReg$ = () => {};
 global.$RefreshSig$ = () => (type) => type;
 global.$RefreshRuntime$ = {
-  isReactRefreshBoundary,
   getRegisterFunction: () => {
     return (type, id) => {
-      if (isReactRefreshBoundary(type)) return;
-      return RefreshRuntime.register(type, id);
+      if (!isReactRefreshBoundary(type)) return;
+      RefreshRuntime.register(type, id);
     };
   },
   getCreateSignatureFunction: () => {
-    return () => (type, id, forceReset, getCustomHooks) => {
-      if (isReactRefreshBoundary(type)) return;
-      return RefreshRuntime.createSignatureFunctionForTransform(type, id, forceReset, getCustomHooks);
+    return () => {
+      const signature = RefreshRuntime.createSignatureFunctionForTransform();
+      return (type, id, forceReset, getCustomHooks) => {
+        if (!isReactRefreshBoundary(type)) return;
+        signature(type, id, forceReset, getCustomHooks);
+      }
     };
   },
-};
-global.__hmr__ = (type, id) => ({
-  accept: () => {
-    if (isReactRefreshBoundary(type)) {
-      createHmrContext(id).accept();
-    }
+  accept: (type) => {
+    isReactRefreshBoundary(type) && createHmrContext(type).accept();
   },
-});
+};
 ```
 
 </details>
