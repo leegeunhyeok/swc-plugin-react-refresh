@@ -1,3 +1,5 @@
+#![cfg_attr(not(debug_assertions), allow(dead_code))]
+
 use std::collections::HashSet;
 use swc_core::ecma::{
     ast::*,
@@ -16,7 +18,6 @@ impl IgnoreIdentifierCollector {
     }
 
     fn add(&mut self, identifier: String) {
-        println!("ignore identifier: {:#?}", identifier);
         self.black_list.insert(identifier);
     }
 
