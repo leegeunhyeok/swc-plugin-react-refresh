@@ -55,12 +55,16 @@ struct ComponentMeta {
 /// For add the empty signature function call expression into React component
 /// and check if any custom hooks are used.
 struct ReactRefreshRuntimeComponent {
+    component_folded: bool,
     has_custom_hook_call: bool,
 }
 
 impl ReactRefreshRuntimeComponent {
     fn default() -> ReactRefreshRuntimeComponent {
-        ReactRefreshRuntimeComponent { has_custom_hook_call: false }
+        ReactRefreshRuntimeComponent {
+            component_folded: false,
+            has_custom_hook_call: false,
+        }
     }
 
     /// Returns a statement that call the signature function without arguments.
@@ -105,6 +109,8 @@ impl ReactRefreshRuntimeComponent {
 
 impl Fold for ReactRefreshRuntimeComponent {
     fn fold_block_stmt(&mut self, mut block_stmt: BlockStmt) -> BlockStmt {
+        self.component_folded = block_stmt.stmts.len() > 0;
+
         for stmt in block_stmt.stmts.iter() {
             // Explore all of function call statements and check if any custom hooks are used.
             if self.find_custom_hook_call_from_stmt(stmt) {
@@ -170,19 +176,20 @@ impl ReactRefreshRuntime {
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
 
-        if !is_react_component_name(&component_name) {
-            return false;
-        }
-
-        if !(self.component_names.contains(&component_name) || self.black_list.contains(&component_name)) {
+        if !is_react_component_name(&component_name) || !self.component_names.contains(&component_name) || self.black_list.contains(&component_name) {
             let fold_component_inner = &mut ReactRefreshRuntimeComponent::default();
-            self.module_body.push(module.to_owned().fold_children_with(fold_component_inner));
-            self.component_names.insert(component_name.to_owned());
-            self.component_list.push(ComponentMeta {
-                name: component_name.to_owned(),
-                has_custom_hook_call: fold_component_inner.has_custom_hook_call,
-            });
-            return true;
+            let fold_result = module.to_owned().fold_children_with(fold_component_inner);
+
+            if fold_component_inner.component_folded {
+                println!("fold {:#?}", fold_result);
+                self.module_body.push(fold_result);
+                self.component_names.insert(component_name.to_owned());
+                self.component_list.push(ComponentMeta {
+                    name: component_name.to_owned(),
+                    has_custom_hook_call: fold_component_inner.has_custom_hook_call,
+                });
+                return true;
+            }
         }
         false
     }
@@ -327,9 +334,16 @@ impl Fold for ReactRefreshRuntime {
             //    - `export { NamedA, NamedB, NamedC };`
             //    - `export default function MyComponent() {};`
             if let ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl))) = module {
-                for decl in var_decl.decls.iter() {
-                    if let Pat::Ident(ident) = &decl.name {
-                        is_folded = self.fold_if_react_component(module, ident);
+                let is_single_decl = var_decl.decls.len() == 1;
+                let decl_expr = var_decl.decls.get(0);
+                if let Some(var_decl) = decl_expr {
+                    match &var_decl.name {
+                        Pat::Ident(ident) => {
+                            if is_single_decl {
+                                is_folded = self.fold_if_react_component(module, ident);
+                            }
+                        }
+                        _ => ()
                     }
                 }
             } else if let ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) = module {
@@ -1262,5 +1276,70 @@ test!(
     global.__hmr__(MixedHooks, "test:MixedHooks").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+// Edge cases
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    multiple_components,
+    // Input codes
+    r#"
+    export const MultipleA = () => {
+        <div>{'Hello, World'}</div>;
+    };
+
+    export const MultipleB = () => {
+        <div>{'Hello, World'}</div>;
+    };
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
+    var __s = global.$RefreshSig$();
+    export const MultipleA = () => {
+        __s();
+        <div>{'Hello, World'}</div>;
+    };
+    export const MultipleB = () => {
+        __s();
+        <div>{'Hello, World'}</div>;
+    };
+    __s(MultipleA, "test:MultipleA", false);
+    global.$RefreshReg$(MultipleA, "test:MultipleA");
+    global.__hmr__(MultipleA, "test:MultipleA").accept();
+    __s(MultipleB, "test:MultipleB", false);
+    global.$RefreshReg$(MultipleB, "test:MultipleB");
+    global.__hmr__(MultipleB, "test:MultipleB").accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    multiple_variable_declares,
+    // Input codes
+    r#"
+    var A, B, C = () => {
+        return <div>{'Hello, World'}</div>;
+    };
+    "#,
+    // Output
+    r#"
+    var A, B, C = () => {
+        return <div>{'Hello, World'}</div>;
+    };
     "#
 );
