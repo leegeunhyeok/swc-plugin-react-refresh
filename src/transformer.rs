@@ -273,7 +273,7 @@ impl ReactRefreshRuntime {
             obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(REGISTER_REF))),
             vec![
                 arg_expr(ident_str_expr(&component_name)),
-                arg_expr(str_expr(&self.get_id(component_name))),
+                arg_expr(str_expr(&component_name)),
             ],
         ))
     }
@@ -403,7 +403,7 @@ impl Fold for ReactRefreshRuntime {
         // - accept (= performReactRefresh)
         //
         // _s(Component, "module_id");
-        // global.$RefreshReg$(Component, "module_id");
+        // global.$RefreshReg$(Component, "Component");
         // global.__hmr__("module_id_here").accept();
         for meta in self.component_list.iter() {
             self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
@@ -465,7 +465,7 @@ test!(
         return <div>{'Hello World'}</div>;
     };
     __s(Component, "test:Component", false);
-    global.$RefreshReg$(Component, "test:Component");
+    global.$RefreshReg$(Component, "Component");
     global.__hmr__(Component, "test:Component").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -543,7 +543,7 @@ test!(
     };
     export default ComponentDefaultFromVar;
     __s(ComponentDefaultFromVar, "test:ComponentDefaultFromVar", false);
-    global.$RefreshReg$(ComponentDefaultFromVar, "test:ComponentDefaultFromVar");
+    global.$RefreshReg$(ComponentDefaultFromVar, "ComponentDefaultFromVar");
     global.__hmr__(ComponentDefaultFromVar, "test:ComponentDefaultFromVar").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -578,7 +578,7 @@ test!(
     };
     export { ComponentNamedExport };
     __s(ComponentNamedExport, "test:ComponentNamedExport", false);
-    global.$RefreshReg$(ComponentNamedExport, "test:ComponentNamedExport");
+    global.$RefreshReg$(ComponentNamedExport, "ComponentNamedExport");
     global.__hmr__(ComponentNamedExport, "test:ComponentNamedExport").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -613,7 +613,7 @@ test!(
     };
     export { ComponentNamedExportAs as Rename };
     __s(ComponentNamedExportAs, "test:ComponentNamedExportAs", false);
-    global.$RefreshReg$(ComponentNamedExportAs, "test:ComponentNamedExportAs");
+    global.$RefreshReg$(ComponentNamedExportAs, "ComponentNamedExportAs");
     global.__hmr__(ComponentNamedExportAs, "test:ComponentNamedExportAs").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -645,7 +645,7 @@ test!(
         return <div>{'Hello World'}</div>;
     };
     __s(ComponentNamedExportDeclare, "test:ComponentNamedExportDeclare", false);
-    global.$RefreshReg$(ComponentNamedExportDeclare, "test:ComponentNamedExportDeclare");
+    global.$RefreshReg$(ComponentNamedExportDeclare, "ComponentNamedExportDeclare");
     global.__hmr__(ComponentNamedExportDeclare, "test:ComponentNamedExportDeclare").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -678,7 +678,7 @@ test!(
         return <div>{'Hello World'}</div>;
     };
     __s(ArrowComponent, "test:ArrowComponent", false);
-    global.$RefreshReg$(ArrowComponent, "test:ArrowComponent");
+    global.$RefreshReg$(ArrowComponent, "ArrowComponent");
     global.__hmr__(ArrowComponent, "test:ArrowComponent").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -734,7 +734,7 @@ test!(
     };
     export default ArrowComponentDefaultFromVar;
     __s(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar", false);
-    global.$RefreshReg$(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar");
+    global.$RefreshReg$(ArrowComponentDefaultFromVar, "ArrowComponentDefaultFromVar");
     global.__hmr__(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -769,7 +769,7 @@ test!(
     };
     export { ArrowComponentNamedExport };
     __s(ArrowComponentNamedExport, "test:ArrowComponentNamedExport", false);
-    global.$RefreshReg$(ArrowComponentNamedExport, "test:ArrowComponentNamedExport");
+    global.$RefreshReg$(ArrowComponentNamedExport, "ArrowComponentNamedExport");
     global.__hmr__(ArrowComponentNamedExport, "test:ArrowComponentNamedExport").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -804,7 +804,7 @@ test!(
     };
     export { ArrowComponentNamedExportAs as Rename };
     __s(ArrowComponentNamedExportAs, "test:ArrowComponentNamedExportAs", false);
-    global.$RefreshReg$(ArrowComponentNamedExportAs, "test:ArrowComponentNamedExportAs");
+    global.$RefreshReg$(ArrowComponentNamedExportAs, "ArrowComponentNamedExportAs");
     global.__hmr__(ArrowComponentNamedExportAs, "test:ArrowComponentNamedExportAs").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -836,7 +836,7 @@ test!(
         return <div>{'Hello World'}</div>;
     };
     __s(ArrowComponentNamedExportDeclare, "test:ArrowComponentNamedExportDeclare", false);
-    global.$RefreshReg$(ArrowComponentNamedExportDeclare, "test:ArrowComponentNamedExportDeclare");
+    global.$RefreshReg$(ArrowComponentNamedExportDeclare, "ArrowComponentNamedExportDeclare");
     global.__hmr__(ArrowComponentNamedExportDeclare, "test:ArrowComponentNamedExportDeclare").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -869,7 +869,7 @@ test!(
         return <div>{'Hello World'}</div>;
     });
     __s(MemoComponentA, "test:MemoComponentA", false);
-    global.$RefreshReg$(MemoComponentA, "test:MemoComponentA");
+    global.$RefreshReg$(MemoComponentA, "MemoComponentA");
     global.__hmr__(MemoComponentA, "test:MemoComponentA").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -901,7 +901,7 @@ test!(
         return <div>{'Hello World'}</div>;
     });
     __s(MemoComponentB, "test:MemoComponentB", false);
-    global.$RefreshReg$(MemoComponentB, "test:MemoComponentB");
+    global.$RefreshReg$(MemoComponentB, "MemoComponentB");
     global.__hmr__(MemoComponentB, "test:MemoComponentB").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1002,7 +1002,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(NoHookComponent, "test:NoHookComponent", false);
-    global.$RefreshReg$(NoHookComponent, "test:NoHookComponent");
+    global.$RefreshReg$(NoHookComponent, "NoHookComponent");
     global.__hmr__(NoHookComponent, "test:NoHookComponent").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1037,7 +1037,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(NonDeclBuiltinHook, "test:NonDeclBuiltinHook", false);
-    global.$RefreshReg$(NonDeclBuiltinHook, "test:NonDeclBuiltinHook");
+    global.$RefreshReg$(NonDeclBuiltinHook, "NonDeclBuiltinHook");
     global.__hmr__(NonDeclBuiltinHook, "test:NonDeclBuiltinHook").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1072,7 +1072,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(DeclBuiltinHook, "test:DeclBuiltinHook", false);
-    global.$RefreshReg$(DeclBuiltinHook, "test:DeclBuiltinHook");
+    global.$RefreshReg$(DeclBuiltinHook, "DeclBuiltinHook");
     global.__hmr__(DeclBuiltinHook, "test:DeclBuiltinHook").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1117,7 +1117,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(MixedBuiltinHooks, "test:MixedBuiltinHooks", false);
-    global.$RefreshReg$(MixedBuiltinHooks, "test:MixedBuiltinHooks");
+    global.$RefreshReg$(MixedBuiltinHooks, "MixedBuiltinHooks");
     global.__hmr__(MixedBuiltinHooks, "test:MixedBuiltinHooks").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1152,7 +1152,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(NonDeclCustomHook, "test:NonDeclCustomHook", true);
-    global.$RefreshReg$(NonDeclCustomHook, "test:NonDeclCustomHook");
+    global.$RefreshReg$(NonDeclCustomHook, "NonDeclCustomHook");
     global.__hmr__(NonDeclCustomHook, "test:NonDeclCustomHook").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1187,7 +1187,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(DeclCustomHook, "test:DeclCustomHook", true);
-    global.$RefreshReg$(DeclCustomHook, "test:DeclCustomHook");
+    global.$RefreshReg$(DeclCustomHook, "DeclCustomHook");
     global.__hmr__(DeclCustomHook, "test:DeclCustomHook").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1225,7 +1225,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(MixedCustomHooks, "test:MixedCustomHooks", true);
-    global.$RefreshReg$(MixedCustomHooks, "test:MixedCustomHooks");
+    global.$RefreshReg$(MixedCustomHooks, "MixedCustomHooks");
     global.__hmr__(MixedCustomHooks, "test:MixedCustomHooks").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1271,7 +1271,7 @@ test!(
         return <div>{'Hello, World'}</div>;
     }
     __s(MixedHooks, "test:MixedHooks", true);
-    global.$RefreshReg$(MixedHooks, "test:MixedHooks");
+    global.$RefreshReg$(MixedHooks, "MixedHooks");
     global.__hmr__(MixedHooks, "test:MixedHooks").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
@@ -1312,10 +1312,10 @@ test!(
         <div>{'Hello, World'}</div>;
     };
     __s(MultipleA, "test:MultipleA", false);
-    global.$RefreshReg$(MultipleA, "test:MultipleA");
+    global.$RefreshReg$(MultipleA, "MultipleA");
     global.__hmr__(MultipleA, "test:MultipleA").accept();
     __s(MultipleB, "test:MultipleB", false);
-    global.$RefreshReg$(MultipleB, "test:MultipleB");
+    global.$RefreshReg$(MultipleB, "MultipleB");
     global.__hmr__(MultipleB, "test:MultipleB").accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
