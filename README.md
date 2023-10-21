@@ -68,6 +68,13 @@ const ModuleMap = typeof WeakMap === 'function' ? WeakMap : Map;
 const modules = new ModuleMap();
 
 const createHmrContext = (type) => {
+  if (!isReactRefreshBoundary(type)) {
+    return {
+      accept: () => undefined,
+      dispose: () => undefined,
+    };
+  }
+
   const state = {
     timeout: null,
     accepted: false,
@@ -127,9 +134,7 @@ global.$RefreshRuntime$ = {
       }
     };
   },
-  accept: (type) => {
-    isReactRefreshBoundary(type) && createHmrContext(type).accept();
-  },
+  getContext: (type) => createHmrContext(type),
 };
 ```
 

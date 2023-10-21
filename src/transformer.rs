@@ -27,7 +27,8 @@ const SIGNATURE_REF: &str = "$RefreshSig$";
 const RUNTIME_REF: &str = "$RefreshRuntime$";
 const RUNTIME_GET_REGISTER_FN: &str = "getRegisterFunction";
 const RUNTIME_GET_SIGNATURE_FN: &str = "getCreateSignatureFunction";
-const RUNTIME_HMR_ACCEPT_FN: &str = "accept";
+const RUNTIME_GET_CONTEXT_FN: &str = "getContext";
+const CONTEXT_ACCEPT_FN: &str = "accept";
 const TEMP_REGISTER_REF: &str = "__prevRefreshReg";
 const TEMP_SIGNATURE_REF: &str = "__prevRefreshSig";
 const SIGNATURE_FN: &str = "__s";
@@ -278,16 +279,24 @@ impl ReactRefreshRuntime {
 
     /// Returns a statement that call the HMR accept method.
     ///
-    /// Code: `global.$RefreshRuntime$.accept(Component);`
+    /// Code: `global.$RefreshRuntime$.getContext().accept(Component);`
     fn get_call_accept_stmt(&self, component_name: String) -> Stmt {
-        to_stmt(call_expr(
+        let call_get_ctx_fn = call_expr(
             obj_prop_expr(
-                obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(RUNTIME_REF))),
-                ident(js_word!(RUNTIME_HMR_ACCEPT_FN)),
+                obj_prop_expr(
+                    ident_expr(js_word!(GLOBAL)),
+                    ident(js_word!(RUNTIME_REF))
+                ),
+                ident(js_word!(RUNTIME_GET_CONTEXT_FN)),
             ),
             vec![
                 arg_expr(ident_str_expr(&component_name)),
-            ],
+            ]
+        );
+
+        to_stmt(call_expr(
+            obj_prop_expr(call_get_ctx_fn, ident(js_word!(CONTEXT_ACCEPT_FN))),
+            vec![],
         ))
     }
 
@@ -398,7 +407,7 @@ impl Fold for ReactRefreshRuntime {
         //
         // _s(Component, "module_id");
         // global.$RefreshReg$(Component, "Component");
-        // global.$RefreshRuntime$.accept(Component);
+        // global.$RefreshRuntime$.getContext(Component).accept();
         for meta in self.component_list.iter() {
             self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
                 meta.name.to_owned(),
@@ -460,7 +469,7 @@ test!(
     };
     __s(Component, "test:Component", false);
     global.$RefreshReg$(Component, "Component");
-    global.$RefreshRuntime$.accept(Component);
+    global.$RefreshRuntime$.getContext(Component).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -538,7 +547,7 @@ test!(
     export default ComponentDefaultFromVar;
     __s(ComponentDefaultFromVar, "test:ComponentDefaultFromVar", false);
     global.$RefreshReg$(ComponentDefaultFromVar, "ComponentDefaultFromVar");
-    global.$RefreshRuntime$.accept(ComponentDefaultFromVar);
+    global.$RefreshRuntime$.getContext(ComponentDefaultFromVar).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -573,7 +582,7 @@ test!(
     export { ComponentNamedExport };
     __s(ComponentNamedExport, "test:ComponentNamedExport", false);
     global.$RefreshReg$(ComponentNamedExport, "ComponentNamedExport");
-    global.$RefreshRuntime$.accept(ComponentNamedExport);
+    global.$RefreshRuntime$.getContext(ComponentNamedExport).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -608,7 +617,7 @@ test!(
     export { ComponentNamedExportAs as Rename };
     __s(ComponentNamedExportAs, "test:ComponentNamedExportAs", false);
     global.$RefreshReg$(ComponentNamedExportAs, "ComponentNamedExportAs");
-    global.$RefreshRuntime$.accept(ComponentNamedExportAs);
+    global.$RefreshRuntime$.getContext(ComponentNamedExportAs).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -640,7 +649,7 @@ test!(
     };
     __s(ComponentNamedExportDeclare, "test:ComponentNamedExportDeclare", false);
     global.$RefreshReg$(ComponentNamedExportDeclare, "ComponentNamedExportDeclare");
-    global.$RefreshRuntime$.accept(ComponentNamedExportDeclare);
+    global.$RefreshRuntime$.getContext(ComponentNamedExportDeclare).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -673,7 +682,7 @@ test!(
     };
     __s(ArrowComponent, "test:ArrowComponent", false);
     global.$RefreshReg$(ArrowComponent, "ArrowComponent");
-    global.$RefreshRuntime$.accept(ArrowComponent);
+    global.$RefreshRuntime$.getContext(ArrowComponent).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -729,7 +738,7 @@ test!(
     export default ArrowComponentDefaultFromVar;
     __s(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar", false);
     global.$RefreshReg$(ArrowComponentDefaultFromVar, "ArrowComponentDefaultFromVar");
-    global.$RefreshRuntime$.accept(ArrowComponentDefaultFromVar);
+    global.$RefreshRuntime$.getContext(ArrowComponentDefaultFromVar).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -764,7 +773,7 @@ test!(
     export { ArrowComponentNamedExport };
     __s(ArrowComponentNamedExport, "test:ArrowComponentNamedExport", false);
     global.$RefreshReg$(ArrowComponentNamedExport, "ArrowComponentNamedExport");
-    global.$RefreshRuntime$.accept(ArrowComponentNamedExport);
+    global.$RefreshRuntime$.getContext(ArrowComponentNamedExport).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -799,7 +808,7 @@ test!(
     export { ArrowComponentNamedExportAs as Rename };
     __s(ArrowComponentNamedExportAs, "test:ArrowComponentNamedExportAs", false);
     global.$RefreshReg$(ArrowComponentNamedExportAs, "ArrowComponentNamedExportAs");
-    global.$RefreshRuntime$.accept(ArrowComponentNamedExportAs);
+    global.$RefreshRuntime$.getContext(ArrowComponentNamedExportAs).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -831,7 +840,7 @@ test!(
     };
     __s(ArrowComponentNamedExportDeclare, "test:ArrowComponentNamedExportDeclare", false);
     global.$RefreshReg$(ArrowComponentNamedExportDeclare, "ArrowComponentNamedExportDeclare");
-    global.$RefreshRuntime$.accept(ArrowComponentNamedExportDeclare);
+    global.$RefreshRuntime$.getContext(ArrowComponentNamedExportDeclare).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -864,7 +873,7 @@ test!(
     });
     __s(MemoComponentA, "test:MemoComponentA", false);
     global.$RefreshReg$(MemoComponentA, "MemoComponentA");
-    global.$RefreshRuntime$.accept(MemoComponentA);
+    global.$RefreshRuntime$.getContext(MemoComponentA).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -896,7 +905,7 @@ test!(
     });
     __s(MemoComponentB, "test:MemoComponentB", false);
     global.$RefreshReg$(MemoComponentB, "MemoComponentB");
-    global.$RefreshRuntime$.accept(MemoComponentB);
+    global.$RefreshRuntime$.getContext(MemoComponentB).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -997,7 +1006,7 @@ test!(
     }
     __s(NoHookComponent, "test:NoHookComponent", false);
     global.$RefreshReg$(NoHookComponent, "NoHookComponent");
-    global.$RefreshRuntime$.accept(NoHookComponent);
+    global.$RefreshRuntime$.getContext(NoHookComponent).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1032,7 +1041,7 @@ test!(
     }
     __s(NonDeclBuiltinHook, "test:NonDeclBuiltinHook", false);
     global.$RefreshReg$(NonDeclBuiltinHook, "NonDeclBuiltinHook");
-    global.$RefreshRuntime$.accept(NonDeclBuiltinHook);
+    global.$RefreshRuntime$.getContext(NonDeclBuiltinHook).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1067,7 +1076,7 @@ test!(
     }
     __s(DeclBuiltinHook, "test:DeclBuiltinHook", false);
     global.$RefreshReg$(DeclBuiltinHook, "DeclBuiltinHook");
-    global.$RefreshRuntime$.accept(DeclBuiltinHook);
+    global.$RefreshRuntime$.getContext(DeclBuiltinHook).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1112,7 +1121,7 @@ test!(
     }
     __s(MixedBuiltinHooks, "test:MixedBuiltinHooks", false);
     global.$RefreshReg$(MixedBuiltinHooks, "MixedBuiltinHooks");
-    global.$RefreshRuntime$.accept(MixedBuiltinHooks);
+    global.$RefreshRuntime$.getContext(MixedBuiltinHooks).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1147,7 +1156,7 @@ test!(
     }
     __s(NonDeclCustomHook, "test:NonDeclCustomHook", true);
     global.$RefreshReg$(NonDeclCustomHook, "NonDeclCustomHook");
-    global.$RefreshRuntime$.accept(NonDeclCustomHook);
+    global.$RefreshRuntime$.getContext(NonDeclCustomHook).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1182,7 +1191,7 @@ test!(
     }
     __s(DeclCustomHook, "test:DeclCustomHook", true);
     global.$RefreshReg$(DeclCustomHook, "DeclCustomHook");
-    global.$RefreshRuntime$.accept(DeclCustomHook);
+    global.$RefreshRuntime$.getContext(DeclCustomHook).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1220,7 +1229,7 @@ test!(
     }
     __s(MixedCustomHooks, "test:MixedCustomHooks", true);
     global.$RefreshReg$(MixedCustomHooks, "MixedCustomHooks");
-    global.$RefreshRuntime$.accept(MixedCustomHooks);
+    global.$RefreshRuntime$.getContext(MixedCustomHooks).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1266,7 +1275,7 @@ test!(
     }
     __s(MixedHooks, "test:MixedHooks", true);
     global.$RefreshReg$(MixedHooks, "MixedHooks");
-    global.$RefreshRuntime$.accept(MixedHooks);
+    global.$RefreshRuntime$.getContext(MixedHooks).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
@@ -1307,10 +1316,10 @@ test!(
     };
     __s(MultipleA, "test:MultipleA", false);
     global.$RefreshReg$(MultipleA, "MultipleA");
-    global.$RefreshRuntime$.accept(MultipleA);
+    global.$RefreshRuntime$.getContext(MultipleA).accept();
     __s(MultipleB, "test:MultipleB", false);
     global.$RefreshReg$(MultipleB, "MultipleB");
-    global.$RefreshRuntime$.accept(MultipleB);
+    global.$RefreshRuntime$.getContext(MultipleB).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
