@@ -35,7 +35,21 @@ await transform(code, {
     experimental: {
       plugins: [
         // Add plugin here
-        ['swc-plugin-react-refresh', { skipEnvCheck: true }],
+        ['swc-plugin-react-refresh', {
+          /**
+           * moduleId: string;
+           * 
+           * Module id (eg. generated id by bundler)
+           */
+          moduleId: "",
+          /**
+           * skipEnvCheck?: boolean;
+           * 
+           * Plugin available on only development environment.
+           * If you want to use plugin in production, set `skipEnvCheck` to `true`.
+           */
+          skipEnvCheck: true,
+        }],
       ],
     },
   },
@@ -134,6 +148,10 @@ cargo build-wasm32 --release # target: wasm32-unknown-unknown
 
 # run unit tests
 cargo test
+
+# run on @swc/core (debug build required)
+yarn build
+yarn demo
 ```
 
 ## License
