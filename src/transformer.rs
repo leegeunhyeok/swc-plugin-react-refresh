@@ -5,6 +5,7 @@ use swc_core::ecma::{
   visit::{noop_fold_type, VisitWith, Fold, FoldWith},
   transforms::testing::test,
 };
+use swc_common::Span;
 use crate::{utils::{
     ident,
     ident_expr,
@@ -47,6 +48,7 @@ const BUILTIN_HOOKS: &'static [&'static str] = &[
 ];
 
 struct ComponentMeta {
+    span: Span,
     name: String,
     builtin_hook_count: i32,
     custom_hook_count: i32,
@@ -55,7 +57,7 @@ struct ComponentMeta {
 /// For add the empty signature function call expression into React component
 /// and check if any custom hooks are used.
 struct ReactRefreshRuntimeComponent {
-    component_folded: bool,
+    is_empty: bool,
     builtin_hook_count: i32,
     custom_hook_count: i32,
 }
@@ -63,7 +65,7 @@ struct ReactRefreshRuntimeComponent {
 impl ReactRefreshRuntimeComponent {
     fn default() -> ReactRefreshRuntimeComponent {
         ReactRefreshRuntimeComponent {
-            component_folded: false,
+            is_empty: false,
             builtin_hook_count: 0,
             custom_hook_count: 0,
         }
@@ -109,7 +111,7 @@ impl ReactRefreshRuntimeComponent {
 
 impl Fold for ReactRefreshRuntimeComponent {
     fn fold_block_stmt(&mut self, mut block_stmt: BlockStmt) -> BlockStmt {
-        self.component_folded = block_stmt.stmts.len() > 0;
+        self.is_empty = block_stmt.stmts.len() == 0;
 
         for stmt in block_stmt.stmts.iter() {
             // Explore all of function call statements.
@@ -165,7 +167,7 @@ impl ReactRefreshRuntime {
     }
 
     /// Returns id
-    fn get_id(&self, identifier: String) -> String {
+    fn get_id(&self, identifier: &String) -> String {
         let mut owned_string = self.module_id.to_owned();
         owned_string.push_str(":");
         owned_string.push_str(identifier.as_str());
@@ -179,16 +181,17 @@ impl ReactRefreshRuntime {
         let component_name = get_name_from_ident(ident);
 
         if !is_react_component_name(&component_name) || !self.component_names.contains(&component_name) || self.black_list.contains(&component_name) {
-            let fold_component_inner = &mut ReactRefreshRuntimeComponent::default();
-            let fold_result = module.to_owned().fold_children_with(fold_component_inner);
+            let component = &mut ReactRefreshRuntimeComponent::default();
+            let component_stmt = module.to_owned().fold_children_with(component);
 
-            if fold_component_inner.component_folded {
-                self.module_body.push(fold_result);
+            if !component.is_empty {
+                self.module_body.push(component_stmt);
                 self.component_names.insert(component_name.to_owned());
                 self.component_list.push(ComponentMeta {
+                    span: ident.span,
                     name: component_name.to_owned(),
-                    builtin_hook_count: fold_component_inner.builtin_hook_count,
-                    custom_hook_count: fold_component_inner.custom_hook_count,
+                    builtin_hook_count: component.builtin_hook_count,
+                    custom_hook_count: component.custom_hook_count,
                 });
                 return true;
             }
@@ -257,11 +260,11 @@ impl ReactRefreshRuntime {
     /// Returns a statement that call the created signature function.
     ///
     /// Code: `__s(Component, "module_id", has_custom_hook_call);`
-    fn get_call_signature_fn_stmt(&self, component_name: String, has_custom_hook_call: bool) -> Stmt {
+    fn get_call_signature_fn_stmt(&self, component_name: &String, span: Span, has_custom_hook_call: bool) -> Stmt {
         to_stmt(call_expr(
             ident_expr(js_word!(SIGNATURE_FN)),
             vec![
-                arg_expr(ident_str_expr(&component_name)),
+                arg_expr(ident_str_expr(component_name, span)),
                 arg_expr(str_expr(&self.get_id(component_name))),
                 arg_expr(bool_expr(has_custom_hook_call)),
             ],
@@ -271,12 +274,12 @@ impl ReactRefreshRuntime {
     /// Returns a statement that call the register function.
     ///
     /// Code: `global.$RefreshRef$(Component, "Component");`
-    fn get_call_register_fn_stmt(&self, component_name: String) -> Stmt {
+    fn get_call_register_fn_stmt(&self, component_name: &String, span: Span) -> Stmt {
         to_stmt(call_expr(
             obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(REGISTER_REF))),
             vec![
-                arg_expr(ident_str_expr(&component_name)),
-                arg_expr(str_expr(&component_name)),
+                arg_expr(ident_str_expr(component_name, span)),
+                arg_expr(str_expr(component_name)),
             ],
         ))
     }
@@ -284,7 +287,7 @@ impl ReactRefreshRuntime {
     /// Returns a statement that call the HMR accept method.
     ///
     /// Code: `global.$RefreshRuntime$.getContext().accept(Component);`
-    fn get_call_accept_stmt(&self, component_name: String) -> Stmt {
+    fn get_call_accept_stmt(&self, component_name: &String, span: Span) -> Stmt {
         let call_get_ctx_fn = call_expr(
             obj_prop_expr(
                 obj_prop_expr(
@@ -294,7 +297,7 @@ impl ReactRefreshRuntime {
                 ident(js_word!(RUNTIME_GET_CONTEXT_FN)),
             ),
             vec![
-                arg_expr(ident_str_expr(&component_name)),
+                arg_expr(ident_str_expr(component_name, span)),
             ]
         );
 
@@ -409,17 +412,24 @@ impl Fold for ReactRefreshRuntime {
         // _s(Component, "module_id");
         // global.$RefreshReg$(Component, "Component");
         // global.$RefreshRuntime$.getContext(Component).accept();
-        for meta in self.component_list.iter() {
-            let has_hook = meta.builtin_hook_count + meta.custom_hook_count > 0;
+        for component in self.component_list.iter() {
+            let has_hook = component.builtin_hook_count + component.custom_hook_count > 0;
             should_assign_sig_fn = should_assign_sig_fn || has_hook;
             if has_hook {
                 self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
-                    meta.name.to_owned(),
-                    meta.custom_hook_count > 0,
+                    &component.name,
+                    component.span,
+                    component.custom_hook_count > 0,
                 )));
             }
-            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(meta.name.to_owned())));
-            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(meta.name.to_owned())));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(
+                &component.name,
+                component.span,
+            )));
+            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(
+                &component.name,
+                component.span,
+            )));
         }
 
         // If any components use hooks, define a signature function.

@@ -2,7 +2,7 @@ use swc_core::ecma::{
     ast::*,
     atoms::Atom,
 };
-use swc_common::DUMMY_SP;
+use swc_common::{Span, DUMMY_SP};
 
 /// Check provided name is valid React component name.
 /// 
@@ -25,8 +25,8 @@ pub fn ident(sym: Atom) -> Ident {
 }
 
 /// Returns an identify by string.
-pub fn ident_str(sym: &String) -> Ident {
-    Ident::new(sym.to_owned().into(), DUMMY_SP)
+pub fn ident_str(sym: &String, span: Span) -> Ident {
+    Ident::new(sym.to_owned().into(), span)
 }
 
 /// Returns an identify expression expression.
@@ -35,8 +35,8 @@ pub fn ident_expr(sym: Atom) -> Expr {
 }
 
 /// Returns an identify expression by string.
-pub fn ident_str_expr(sym: &String) -> Expr {
-    Expr::Ident(ident_str(sym.into()))
+pub fn ident_str_expr(sym: &String, span: Span) -> Expr {
+    Expr::Ident(ident_str(sym.into(), span))
 }
 
 /// Returns an string literal expression.
