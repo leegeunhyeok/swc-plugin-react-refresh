@@ -48,21 +48,24 @@ const BUILTIN_HOOKS: &'static [&'static str] = &[
 
 struct ComponentMeta {
     name: String,
-    has_custom_hook_call: bool,
+    builtin_hook_count: i32,
+    custom_hook_count: i32,
 }
 
 /// For add the empty signature function call expression into React component
 /// and check if any custom hooks are used.
 struct ReactRefreshRuntimeComponent {
     component_folded: bool,
-    has_custom_hook_call: bool,
+    builtin_hook_count: i32,
+    custom_hook_count: i32,
 }
 
 impl ReactRefreshRuntimeComponent {
     fn default() -> ReactRefreshRuntimeComponent {
         ReactRefreshRuntimeComponent {
             component_folded: false,
-            has_custom_hook_call: false,
+            builtin_hook_count: 0,
+            custom_hook_count: 0,
         }
     }
 
@@ -73,36 +76,34 @@ impl ReactRefreshRuntimeComponent {
         to_stmt(call_expr(ident_expr(js_word!(SIGNATURE_FN)), vec![]))
     }
 
-    fn find_custom_hook_call_from_stmt(&self, stmt: &Stmt) -> bool {
-        let mut has_custom_hook = false;
+    fn find_hook_call_from_stmt(&mut self, stmt: &Stmt) {
         // There is two type of call hooks.
         //
         // 1. Call hook only (eg: `useCallback()`)
         // 2. Call hook and assign value to variable (eg: `const [...] = useState(0)`)
         if let Some(call_expr) = stmt.as_expr().and_then(|expr_stmt| expr_stmt.expr.as_call()) {
-            has_custom_hook = has_custom_hook || self.is_custom_hook_call(call_expr);
+            self.count_hook(call_expr);
         } else if let Some(var_decl_stmt) = stmt.as_decl().and_then(|decl_stmt| decl_stmt.as_var()) {
-            has_custom_hook = var_decl_stmt.decls.iter().any(|decl| {
-                decl.init.as_ref().and_then(|init_expr| init_expr.as_call()).map_or(false, |call_expr| {
-                    self.is_custom_hook_call(call_expr)
-                })
-            });
+            for decl in var_decl_stmt.decls.iter() {
+                if let Some(call_expr) = decl.init.as_ref().and_then(|init_expr| init_expr.as_call()) {
+                    self.count_hook(call_expr)
+                }
+            }
         }
-        has_custom_hook
     }
 
-    fn is_custom_hook_call(&self, call_expr: &CallExpr) -> bool {
-        let mut is_custom_hook = false;
+    fn count_hook(&mut self, call_expr: &CallExpr) {
         if let Some(callee_expr) = call_expr.callee.as_expr() {
             // Check if this expression is hook like a `React.useXXX()`.
             if let Some(ident) = callee_expr.as_ident() {
                 let hook_name = ident.sym.to_string();
-                if !BUILTIN_HOOKS.contains(&hook_name.as_str()) && hook_name.starts_with("use") {
-                    is_custom_hook = true;
+                if BUILTIN_HOOKS.contains(&hook_name.as_str()) {
+                    self.builtin_hook_count += 1;
+                } else if hook_name.starts_with("use") {
+                    self.custom_hook_count += 1;
                 }
             }
         }
-        is_custom_hook
     }
 }
 
@@ -111,11 +112,13 @@ impl Fold for ReactRefreshRuntimeComponent {
         self.component_folded = block_stmt.stmts.len() > 0;
 
         for stmt in block_stmt.stmts.iter() {
-            // Explore all of function call statements and check if any custom hooks are used.
-            if self.find_custom_hook_call_from_stmt(stmt) {
-                self.has_custom_hook_call = true;
-                break;
-            }
+            // Explore all of function call statements.
+            self.find_hook_call_from_stmt(stmt)
+        }
+
+        // If no hook call found, do nothing.
+        if self.builtin_hook_count + self.custom_hook_count == 0 {
+            return block_stmt;
         }
 
         // Add `__s();` at the top inside the component.
@@ -184,7 +187,8 @@ impl ReactRefreshRuntime {
                 self.component_names.insert(component_name.to_owned());
                 self.component_list.push(ComponentMeta {
                     name: component_name.to_owned(),
-                    has_custom_hook_call: fold_component_inner.has_custom_hook_call,
+                    builtin_hook_count: fold_component_inner.builtin_hook_count,
+                    custom_hook_count: fold_component_inner.custom_hook_count,
                 });
                 return true;
             }
@@ -379,13 +383,12 @@ impl Fold for ReactRefreshRuntime {
         }
 
         let has_defined_component = self.component_names.len() > 0;
+        let mut should_assign_sig_fn = false;
 
         // If some React component defined, insert the code below at the top.
         //
         // var __prevRefreshReg = global.$RefreshReg$;
         // var __prevRefreshSig = global.$RefreshSig$;
-        // global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
-        // var __s = global.$RefreshSig$();
         if has_defined_component {
             self.module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
                 js_word!(TEMP_REGISTER_REF),
@@ -396,8 +399,6 @@ impl Fold for ReactRefreshRuntime {
                 js_word!(SIGNATURE_REF),
             )));
             self.module_body.insert(2, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
-            self.module_body.insert(3, ModuleItem::Stmt(self.get_assign_signature_fn_stmt()));
-            self.module_body.insert(4, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
         }
 
         // Append the code below at the bottom.
@@ -409,12 +410,25 @@ impl Fold for ReactRefreshRuntime {
         // global.$RefreshReg$(Component, "Component");
         // global.$RefreshRuntime$.getContext(Component).accept();
         for meta in self.component_list.iter() {
-            self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
-                meta.name.to_owned(),
-                meta.has_custom_hook_call,
-            )));
+            let has_hook = meta.builtin_hook_count + meta.custom_hook_count > 0;
+            should_assign_sig_fn = should_assign_sig_fn || has_hook;
+            if has_hook {
+                self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
+                    meta.name.to_owned(),
+                    meta.custom_hook_count > 0,
+                )));
+            }
             self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(meta.name.to_owned())));
             self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(meta.name.to_owned())));
+        }
+
+        // If any components use hooks, define a signature function.
+        //
+        // global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
+        // var __s = global.$RefreshSig$();
+        if has_defined_component && should_assign_sig_fn {
+            self.module_body.insert(3, ModuleItem::Stmt(self.get_assign_signature_fn_stmt()));
+            self.module_body.insert(4, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
         }
 
         // Finally, restore original react-refresh functions.
@@ -461,13 +475,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     function Component() {
-        __s();
         return <div>{'Hello World'}</div>;
     };
-    __s(Component, "test:Component", false);
     global.$RefreshReg$(Component, "Component");
     global.$RefreshRuntime$.getContext(Component).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -538,14 +548,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     function ComponentDefaultFromVar() {
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export default ComponentDefaultFromVar;
-    __s(ComponentDefaultFromVar, "test:ComponentDefaultFromVar", false);
     global.$RefreshReg$(ComponentDefaultFromVar, "ComponentDefaultFromVar");
     global.$RefreshRuntime$.getContext(ComponentDefaultFromVar).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -573,14 +579,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     function ComponentNamedExport() {
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export { ComponentNamedExport };
-    __s(ComponentNamedExport, "test:ComponentNamedExport", false);
     global.$RefreshReg$(ComponentNamedExport, "ComponentNamedExport");
     global.$RefreshRuntime$.getContext(ComponentNamedExport).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -608,14 +610,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     function ComponentNamedExportAs() {
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export { ComponentNamedExportAs as Rename };
-    __s(ComponentNamedExportAs, "test:ComponentNamedExportAs", false);
     global.$RefreshReg$(ComponentNamedExportAs, "ComponentNamedExportAs");
     global.$RefreshRuntime$.getContext(ComponentNamedExportAs).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -641,13 +639,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     export function ComponentNamedExportDeclare() {
-        __s();
         return <div>{'Hello World'}</div>;
     };
-    __s(ComponentNamedExportDeclare, "test:ComponentNamedExportDeclare", false);
     global.$RefreshReg$(ComponentNamedExportDeclare, "ComponentNamedExportDeclare");
     global.$RefreshRuntime$.getContext(ComponentNamedExportDeclare).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -674,13 +668,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const ArrowComponent = ()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     };
-    __s(ArrowComponent, "test:ArrowComponent", false);
     global.$RefreshReg$(ArrowComponent, "ArrowComponent");
     global.$RefreshRuntime$.getContext(ArrowComponent).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -729,14 +719,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const ArrowComponentDefaultFromVar = ()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export default ArrowComponentDefaultFromVar;
-    __s(ArrowComponentDefaultFromVar, "test:ArrowComponentDefaultFromVar", false);
     global.$RefreshReg$(ArrowComponentDefaultFromVar, "ArrowComponentDefaultFromVar");
     global.$RefreshRuntime$.getContext(ArrowComponentDefaultFromVar).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -764,14 +750,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const ArrowComponentNamedExport = ()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export { ArrowComponentNamedExport };
-    __s(ArrowComponentNamedExport, "test:ArrowComponentNamedExport", false);
     global.$RefreshReg$(ArrowComponentNamedExport, "ArrowComponentNamedExport");
     global.$RefreshRuntime$.getContext(ArrowComponentNamedExport).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -799,14 +781,10 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const ArrowComponentNamedExportAs = ()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     };
     export { ArrowComponentNamedExportAs as Rename };
-    __s(ArrowComponentNamedExportAs, "test:ArrowComponentNamedExportAs", false);
     global.$RefreshReg$(ArrowComponentNamedExportAs, "ArrowComponentNamedExportAs");
     global.$RefreshRuntime$.getContext(ArrowComponentNamedExportAs).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -832,13 +810,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     export const ArrowComponentNamedExportDeclare = ()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     };
-    __s(ArrowComponentNamedExportDeclare, "test:ArrowComponentNamedExportDeclare", false);
     global.$RefreshReg$(ArrowComponentNamedExportDeclare, "ArrowComponentNamedExportDeclare");
     global.$RefreshRuntime$.getContext(ArrowComponentNamedExportDeclare).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -865,13 +839,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const MemoComponentA = React.memo(()=>{
-        __s();
         return <div>{'Hello World'}</div>;
     });
-    __s(MemoComponentA, "test:MemoComponentA", false);
     global.$RefreshReg$(MemoComponentA, "MemoComponentA");
     global.$RefreshRuntime$.getContext(MemoComponentA).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -897,13 +867,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     const MemoComponentB = React.memo(function OriginComponent() {
-        __s();
         return <div>{'Hello World'}</div>;
     });
-    __s(MemoComponentB, "test:MemoComponentB", false);
     global.$RefreshReg$(MemoComponentB, "MemoComponentB");
     global.$RefreshRuntime$.getContext(MemoComponentB).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -928,7 +894,6 @@ test!(
     // Output
     r#"
     import RootComponent from 'app/core';
-
     export { RootComponent };
     "#
 );
@@ -949,7 +914,6 @@ test!(
     // Output
     r#"
     import { Button, Text } from 'app/design-system';
-
     export { Button, Text };
     "#
 );
@@ -998,13 +962,9 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     export function NoHookComponent() {
-        __s();
         return <div>{'Hello, World'}</div>;
     }
-    __s(NoHookComponent, "test:NoHookComponent", false);
     global.$RefreshReg$(NoHookComponent, "NoHookComponent");
     global.$RefreshRuntime$.getContext(NoHookComponent).accept();
     global.$RefreshReg$ = __prevRefreshReg;
@@ -1292,11 +1252,11 @@ test!(
     // Input codes
     r#"
     export const MultipleA = () => {
-        <div>{'Hello, World'}</div>;
+        return <div>{'Hello, World'}</div>;
     };
 
     export const MultipleB = () => {
-        <div>{'Hello, World'}</div>;
+        return <div>{'Hello, World'}</div>;
     };
     "#,
     // Output
@@ -1304,22 +1264,47 @@ test!(
     var __prevRefreshReg = global.$RefreshReg$;
     var __prevRefreshSig = global.$RefreshSig$;
     global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
-    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
-    var __s = global.$RefreshSig$();
     export const MultipleA = () => {
-        __s();
-        <div>{'Hello, World'}</div>;
+        return <div>{'Hello, World'}</div>;
     };
     export const MultipleB = () => {
-        __s();
-        <div>{'Hello, World'}</div>;
+        return <div>{'Hello, World'}</div>;
     };
-    __s(MultipleA, "test:MultipleA", false);
     global.$RefreshReg$(MultipleA, "MultipleA");
     global.$RefreshRuntime$.getContext(MultipleA).accept();
-    __s(MultipleB, "test:MultipleB", false);
     global.$RefreshReg$(MultipleB, "MultipleB");
     global.$RefreshRuntime$.getContext(MultipleB).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    invalid_hook_call_in_component,
+    // Input codes
+    r#"
+    export const NotHook = () => {
+        notValidHook();
+
+        return <div>{'Hello, World'}</div>;
+    };
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    export const NotHook = () => {
+        notValidHook();
+        return <div>{'Hello, World'}</div>;
+    };
+    global.$RefreshReg$(NotHook, "NotHook");
+    global.$RefreshRuntime$.getContext(NotHook).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
     "#
