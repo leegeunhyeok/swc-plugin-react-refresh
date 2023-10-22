@@ -4,7 +4,9 @@ Swc plugin implementation of [react-refresh/babel](https://www.npmjs.com/package
 
 > [!IMPORTANT]
 > A plugin for developing bundlers
-> and this plugin is experimental.
+
+> [!WARNING]
+> This plugin is experimental.
 
 - [x] Explore React components in module
   - [x] Function expressions
@@ -15,7 +17,9 @@ Swc plugin implementation of [react-refresh/babel](https://www.npmjs.com/package
 - [x] Get component name from AST
 - [x] Parse hook calls from AST
 - [ ] Parse HoC(High Order Component) expressions(`React.memo`, `React.forwardedRef`, and Custom HoC)
-- [ ] Generate signature key based on the order of hook call expressions
+  - [x] Wrapped components
+  - [ ] Original components
+- [x] ~~Generate signature key based on the order of hook call expressions~~ Use `moduleId` options instead
 
 ## Setup
 
@@ -67,6 +71,10 @@ const RefreshRuntime = require('react-refresh/runtime');
 const ModuleMap = typeof WeakMap === 'function' ? WeakMap : Map;
 const modules = new ModuleMap();
 
+const isReactRefreshBoundary = (type) => {
+  return RefreshRuntime.isLikelyComponentType(type) && !type.prototype.isReactComponent;
+}
+
 const createHmrContext = (type) => {
   if (!isReactRefreshBoundary(type)) {
     return {
@@ -110,10 +118,6 @@ const createHmrContext = (type) => {
   return hot;
 };
 
-const isReactRefreshBoundary = (type) => {
-  return RefreshRuntime.isLikelyComponentType(type) && !type.prototype.isReactComponent;
-}
-
 // `global` is platform dependent.
 RefreshRuntime.injectIntoGlobalHook(global);
 global.$RefreshReg$ = () => {};
@@ -154,8 +158,7 @@ cargo build-wasm32 --release # target: wasm32-unknown-unknown
 # run unit tests
 cargo test
 
-# run on @swc/core (debug build required)
-yarn build
+# run on @swc/core
 yarn demo
 ```
 
