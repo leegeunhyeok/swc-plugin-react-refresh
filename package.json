@@ -1,7 +1,7 @@
 {
   "name": "swc-plugin-react-refresh",
-  "version": "0.1.0-alpha.2",
-  "description": "Swc plugin implementation of react-refresh/babel",
+  "version": "0.1.0-alpha.3",
+  "description": "swc plugin implementation of react-refresh/babel",
   "author": "Geunhyeok LEE <dev.ghlee@gmail.com>",
   "homepage": "https://github.com/leegeunhyeok/swc-plugin-react-refresh#readme",
   "license": "MIT",
