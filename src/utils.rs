@@ -1,13 +1,10 @@
-use swc_core::ecma::{
-    ast::*,
-    atoms::Atom,
-};
 use swc_common::{Span, DUMMY_SP};
+use swc_core::ecma::{ast::*, atoms::Atom};
 
 /// Check provided name is valid React component name.
-/// 
+///
 /// Returns `true` if name starts with capitalize.
-/// 
+///
 /// - MyComponent: `true`
 /// - myComponent: `false`
 pub fn is_react_component_name(name: &String) -> bool {
@@ -87,7 +84,7 @@ pub fn assign_expr(left: Expr, right: Expr) -> Expr {
 /// Returns an expression that call function with arguments.
 ///
 /// Code: `callee(arg1, arg2, ...)`
-pub fn call_expr(callee: Expr, args:  Vec<ExprOrSpread>) -> Expr {
+pub fn call_expr(callee: Expr, args: Vec<ExprOrSpread>) -> Expr {
     Expr::Call(CallExpr {
         span: DUMMY_SP,
         callee: Callee::Expr(Box::new(callee)),
@@ -104,17 +101,15 @@ pub fn decl_var_and_assign_stmt(name: Ident, init: Expr) -> Stmt {
         span: DUMMY_SP,
         kind: VarDeclKind::Var,
         declare: false,
-        decls: vec![
-            VarDeclarator {
-                span: DUMMY_SP,
-                name: Pat::Ident(BindingIdent {
-                    id: name,
-                    type_ann: None,
-                }),
-                init: Some(Box::new(init)),
-                definite: false,
-            },
-        ],
+        decls: vec![VarDeclarator {
+            span: DUMMY_SP,
+            name: Pat::Ident(BindingIdent {
+                id: name,
+                type_ann: None,
+            }),
+            init: Some(Box::new(init)),
+            definite: false,
+        }],
     })))
 }
 

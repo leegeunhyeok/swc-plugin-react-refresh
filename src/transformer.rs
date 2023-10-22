@@ -1,26 +1,19 @@
-use std::collections::HashSet;
-use swc_core::ecma::{
-  ast::*,
-  atoms::{js_word, Atom},
-  visit::{noop_fold_type, VisitWith, Fold, FoldWith},
-  transforms::testing::test,
+use crate::{
+    utils::{
+        arg_expr, assign_expr, bool_expr, call_expr, decl_var_and_assign_stmt, get_name_from_ident,
+        ident, ident_expr, ident_str_expr, is_react_component_name, obj_prop_expr, str_expr,
+        to_stmt,
+    },
+    visitor,
 };
+use std::collections::HashSet;
 use swc_common::Span;
-use crate::{utils::{
-    ident,
-    ident_expr,
-    ident_str_expr,
-    str_expr,
-    bool_expr,
-    arg_expr,
-    obj_prop_expr,
-    assign_expr,
-    call_expr,
-    decl_var_and_assign_stmt,
-    to_stmt,
-    get_name_from_ident,
-    is_react_component_name,
-}, visitor};
+use swc_core::ecma::{
+    ast::*,
+    atoms::{js_word, Atom},
+    transforms::testing::test,
+    visit::{noop_fold_type, Fold, FoldWith, VisitWith},
+};
 
 const GLOBAL: &str = "global";
 const REGISTER_REF: &str = "$RefreshReg$";
@@ -83,11 +76,17 @@ impl ReactRefreshRuntimeComponent {
         //
         // 1. Call hook only (eg: `useCallback()`)
         // 2. Call hook and assign value to variable (eg: `const [...] = useState(0)`)
-        if let Some(call_expr) = stmt.as_expr().and_then(|expr_stmt| expr_stmt.expr.as_call()) {
+        if let Some(call_expr) = stmt
+            .as_expr()
+            .and_then(|expr_stmt| expr_stmt.expr.as_call())
+        {
             self.count_hook(call_expr);
-        } else if let Some(var_decl_stmt) = stmt.as_decl().and_then(|decl_stmt| decl_stmt.as_var()) {
+        } else if let Some(var_decl_stmt) = stmt.as_decl().and_then(|decl_stmt| decl_stmt.as_var())
+        {
             for decl in var_decl_stmt.decls.iter() {
-                if let Some(call_expr) = decl.init.as_ref().and_then(|init_expr| init_expr.as_call()) {
+                if let Some(call_expr) =
+                    decl.init.as_ref().and_then(|init_expr| init_expr.as_call())
+                {
                     self.count_hook(call_expr)
                 }
             }
@@ -175,12 +174,15 @@ impl ReactRefreshRuntime {
     }
 
     /// Fold with ReactRefreshRuntimeComponent if it is valid React component.
-    /// 
+    ///
     /// Returns `true` when folded and otherwise returns `false`
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
 
-        if !is_react_component_name(&component_name) || !self.component_names.contains(&component_name) || self.black_list.contains(&component_name) {
+        if !is_react_component_name(&component_name)
+            || !self.component_names.contains(&component_name)
+            || self.black_list.contains(&component_name)
+        {
             let component = &mut ReactRefreshRuntimeComponent::default();
             let component_stmt = module.to_owned().fold_children_with(component);
 
@@ -200,7 +202,7 @@ impl ReactRefreshRuntime {
     }
 
     /// Returns a statement that temporarily stores the registration function.
-    /// 
+    ///
     /// Code: `var __prevRefreshRef = global.$RefreshRef$;`
     /// Code: `var __prevRefreshSig = global.$RefreshSig$;`
     fn get_assign_temp_ref_fn_stmt(&self, var_name: Atom, prop: Atom) -> Stmt {
@@ -248,10 +250,7 @@ impl ReactRefreshRuntime {
         decl_var_and_assign_stmt(
             ident(js_word!(SIGNATURE_FN)),
             call_expr(
-                obj_prop_expr(
-                    ident_expr(js_word!(GLOBAL)),
-                    ident(js_word!(SIGNATURE_REF)),
-                ),
+                obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(SIGNATURE_REF))),
                 vec![],
             ),
         )
@@ -260,7 +259,12 @@ impl ReactRefreshRuntime {
     /// Returns a statement that call the created signature function.
     ///
     /// Code: `__s(Component, "module_id", has_custom_hook_call);`
-    fn get_call_signature_fn_stmt(&self, component_name: &String, span: Span, has_custom_hook_call: bool) -> Stmt {
+    fn get_call_signature_fn_stmt(
+        &self,
+        component_name: &String,
+        span: Span,
+        has_custom_hook_call: bool,
+    ) -> Stmt {
         to_stmt(call_expr(
             ident_expr(js_word!(SIGNATURE_FN)),
             vec![
@@ -290,15 +294,10 @@ impl ReactRefreshRuntime {
     fn get_call_accept_stmt(&self, component_name: &String, span: Span) -> Stmt {
         let call_get_ctx_fn = call_expr(
             obj_prop_expr(
-                obj_prop_expr(
-                    ident_expr(js_word!(GLOBAL)),
-                    ident(js_word!(RUNTIME_REF))
-                ),
+                obj_prop_expr(ident_expr(js_word!(GLOBAL)), ident(js_word!(RUNTIME_REF))),
                 ident(js_word!(RUNTIME_GET_CONTEXT_FN)),
             ),
-            vec![
-                arg_expr(ident_str_expr(component_name, span)),
-            ]
+            vec![arg_expr(ident_str_expr(component_name, span))],
         );
 
         to_stmt(call_expr(
@@ -352,7 +351,7 @@ impl Fold for ReactRefreshRuntime {
                                 is_folded = self.fold_if_react_component(module, ident);
                             }
                         }
-                        _ => ()
+                        _ => (),
                     }
                 }
             } else if let ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) = module {
@@ -361,14 +360,18 @@ impl Fold for ReactRefreshRuntime {
                 if let Some(named_export) = module_decl.as_export_decl() {
                     match &named_export.decl {
                         Decl::Var(named_var_export) => {
-                            if let Some(named_var_ident) = named_var_export.decls.get(0).and_then(
-                                |d| d.name.as_ident(),
-                            ) {
-                                is_folded = self.fold_if_react_component(module, &named_var_ident.id);
+                            if let Some(named_var_ident) = named_var_export
+                                .decls
+                                .get(0)
+                                .and_then(|d| d.name.as_ident())
+                            {
+                                is_folded =
+                                    self.fold_if_react_component(module, &named_var_ident.id);
                             }
                         }
                         Decl::Fn(named_fn_export) => {
-                            is_folded = self.fold_if_react_component(module, &named_fn_export.ident);
+                            is_folded =
+                                self.fold_if_react_component(module, &named_fn_export.ident);
                         }
                         _ => (),
                     }
@@ -393,15 +396,22 @@ impl Fold for ReactRefreshRuntime {
         // var __prevRefreshReg = global.$RefreshReg$;
         // var __prevRefreshSig = global.$RefreshSig$;
         if has_defined_component {
-            self.module_body.insert(0, ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
-                js_word!(TEMP_REGISTER_REF),
-                js_word!(REGISTER_REF),
-            )));
-            self.module_body.insert(1, ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
-                js_word!(TEMP_SIGNATURE_REF),
-                js_word!(SIGNATURE_REF),
-            )));
-            self.module_body.insert(2, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
+            self.module_body.insert(
+                0,
+                ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
+                    js_word!(TEMP_REGISTER_REF),
+                    js_word!(REGISTER_REF),
+                )),
+            );
+            self.module_body.insert(
+                1,
+                ModuleItem::Stmt(self.get_assign_temp_ref_fn_stmt(
+                    js_word!(TEMP_SIGNATURE_REF),
+                    js_word!(SIGNATURE_REF),
+                )),
+            );
+            self.module_body
+                .insert(2, ModuleItem::Stmt(self.get_assign_register_fn_stmt()));
         }
 
         // Append the code below at the bottom.
@@ -416,20 +426,19 @@ impl Fold for ReactRefreshRuntime {
             let has_hook = component.builtin_hook_count + component.custom_hook_count > 0;
             should_assign_sig_fn = should_assign_sig_fn || has_hook;
             if has_hook {
-                self.module_body.push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
-                    &component.name,
-                    component.span,
-                    component.custom_hook_count > 0,
-                )));
+                self.module_body
+                    .push(ModuleItem::Stmt(self.get_call_signature_fn_stmt(
+                        &component.name,
+                        component.span,
+                        component.custom_hook_count > 0,
+                    )));
             }
-            self.module_body.push(ModuleItem::Stmt(self.get_call_register_fn_stmt(
-                &component.name,
-                component.span,
-            )));
-            self.module_body.push(ModuleItem::Stmt(self.get_call_accept_stmt(
-                &component.name,
-                component.span,
-            )));
+            self.module_body.push(ModuleItem::Stmt(
+                self.get_call_register_fn_stmt(&component.name, component.span),
+            ));
+            self.module_body.push(ModuleItem::Stmt(
+                self.get_call_accept_stmt(&component.name, component.span),
+            ));
         }
 
         // If any components use hooks, define a signature function.
@@ -437,8 +446,10 @@ impl Fold for ReactRefreshRuntime {
         // global.$RefreshSig$ = global.$RefreshRuntime$.createSignatureFunctionForTransform;
         // var __s = global.$RefreshSig$();
         if has_defined_component && should_assign_sig_fn {
-            self.module_body.insert(3, ModuleItem::Stmt(self.get_assign_signature_fn_stmt()));
-            self.module_body.insert(4, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
+            self.module_body
+                .insert(3, ModuleItem::Stmt(self.get_assign_signature_fn_stmt()));
+            self.module_body
+                .insert(4, ModuleItem::Stmt(self.get_create_signature_fn_stmt()));
         }
 
         // Finally, restore original react-refresh functions.
@@ -446,14 +457,14 @@ impl Fold for ReactRefreshRuntime {
         // global.$RefreshReg$ = __prevRefreshReg;
         // global.$RefreshSig$ = __prevRefreshSig;
         if has_defined_component {
-            self.module_body.push(ModuleItem::Stmt(self.get_restore_ref_fn_stmt(
-                js_word!(REGISTER_REF),
-                js_word!(TEMP_REGISTER_REF)
-            )));
-            self.module_body.push(ModuleItem::Stmt(self.get_restore_ref_fn_stmt(
-                js_word!(SIGNATURE_REF),
-                js_word!(TEMP_SIGNATURE_REF),
-            )));
+            self.module_body.push(ModuleItem::Stmt(
+                self.get_restore_ref_fn_stmt(js_word!(REGISTER_REF), js_word!(TEMP_REGISTER_REF)),
+            ));
+            self.module_body
+                .push(ModuleItem::Stmt(self.get_restore_ref_fn_stmt(
+                    js_word!(SIGNATURE_REF),
+                    js_word!(TEMP_SIGNATURE_REF),
+                )));
         }
 
         Module {

@@ -1,11 +1,8 @@
 #![cfg_attr(not(debug_assertions), allow(dead_code))]
 
-use std::collections::HashSet;
-use swc_core::ecma::{
-    ast::*,
-    visit::Visit,
-};
 use crate::utils::{get_name_from_ident, is_react_component_name};
+use std::collections::HashSet;
+use swc_core::ecma::{ast::*, visit::Visit};
 
 /// Visit top-level to find external and class components.
 pub struct IgnoreIdentifierCollector {
@@ -14,7 +11,9 @@ pub struct IgnoreIdentifierCollector {
 
 impl IgnoreIdentifierCollector {
     fn default() -> IgnoreIdentifierCollector {
-        IgnoreIdentifierCollector { black_list: HashSet::new() }
+        IgnoreIdentifierCollector {
+            black_list: HashSet::new(),
+        }
     }
 
     fn add(&mut self, identifier: String) {

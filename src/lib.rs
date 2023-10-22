@@ -1,16 +1,12 @@
 use serde::Deserialize;
-use swc_core::ecma::{
-    ast::Program,
-    visit::FoldWith,
-};
+use swc_core::ecma::{ast::Program, visit::FoldWith};
 use swc_core::plugin::{
-    plugin_transform,
+    metadata::TransformPluginMetadataContextKind, plugin_transform,
     proxies::TransformPluginProgramMetadata,
-    metadata::TransformPluginMetadataContextKind,
 };
 mod transformer;
-mod visitor;
 mod utils;
+mod visitor;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
