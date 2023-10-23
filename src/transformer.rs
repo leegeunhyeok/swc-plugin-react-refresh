@@ -177,8 +177,6 @@ impl ReactRefreshRuntime {
     /// Returns `true` when folded and otherwise returns `false`
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
-        println!("comp {:#?}", component_name);
-
         if is_componentish_name(&component_name)
             && !self.component_names.contains(&component_name)
             && !self.black_list.contains(&component_name)
@@ -389,10 +387,12 @@ impl Fold for ReactRefreshRuntime {
                         }
                         _ => (),
                     }
-                } else if let Some(default_export) = module_decl.as_export_default_expr() {
-                    if let Some(default_export_ident) = default_export.expr.as_ident() {
-                        is_folded = self.fold_if_react_component(module, &default_export_ident);
-                    }
+                } else if let Some(default_export) = module_decl.as_export_default_decl() {
+                    if let Some(fn_expr) = default_export.decl.as_fn_expr() {
+                        if let Some(fn_ident) = &fn_expr.ident {
+                            is_folded = self.fold_if_react_component(module, fn_ident);
+                        }
+                    } 
                 }
             }
 
@@ -541,7 +541,6 @@ test!(
     "#
 );
 
-// TODO: default export with declares, should wrap with react-refresh boundary.
 test!(
     swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
         jsx: true,
@@ -557,9 +556,16 @@ test!(
     "#,
     // Output
     r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
     export default function ComponentDefault() {
         return <div>{'Hello World'}</div>;
     };
+    global.$RefreshReg$(ComponentDefault, "ComponentDefault");
+    global.$RefreshRuntime$.getContext(ComponentDefault).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
     "#
 );
 
