@@ -1,8 +1,7 @@
 use crate::{
     utils::{
         arg_expr, assign_expr, bool_expr, call_expr, decl_var_and_assign_stmt, get_name_from_ident,
-        ident, ident_expr, ident_str_expr, is_componentish_name, obj_prop_expr, str_expr,
-        to_stmt,
+        ident, ident_expr, ident_str_expr, is_componentish_name, obj_prop_expr, str_expr, to_stmt,
     },
     visitor,
 };
@@ -178,10 +177,11 @@ impl ReactRefreshRuntime {
     /// Returns `true` when folded and otherwise returns `false`
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
+        println!("comp {:#?}", component_name);
 
         if is_componentish_name(&component_name)
-            || !self.component_names.contains(&component_name)
-            || self.black_list.contains(&component_name)
+            && !self.component_names.contains(&component_name)
+            && !self.black_list.contains(&component_name)
         {
             let component = &mut ReactRefreshRuntimeComponent::default();
             let component_stmt = module.to_owned().fold_children_with(component);
@@ -196,6 +196,30 @@ impl ReactRefreshRuntime {
                     custom_hook_count: component.custom_hook_count,
                 });
                 return true;
+            }
+        }
+        false
+    }
+
+    /// Fold with ReactRefreshRuntimeComponent if it is valid React component.
+    ///
+    /// Returns `true` when folded and otherwise returns `false`
+    fn fold_var_declarator(&mut self, module: &ModuleItem, var_decl: &VarDeclarator) -> bool {
+        if let (Some(ident), Some(init_expr)) = (
+            var_decl.name.as_ident(),
+            var_decl.init.to_owned(),
+        ) {
+            match *init_expr {
+                Expr::Fn(_) => {
+                    return self.fold_if_react_component(module, ident);
+                }
+                Expr::Arrow(_) => {
+                    return self.fold_if_react_component(module, ident);
+                }
+                Expr::Call(_) => {
+                    return self.fold_if_react_component(module, ident);
+                }
+                _ => (),
             }
         }
         false
@@ -342,16 +366,11 @@ impl Fold for ReactRefreshRuntime {
             //    - `export { NamedA, NamedB, NamedC };`
             //    - `export default function MyComponent() {};`
             if let ModuleItem::Stmt(Stmt::Decl(Decl::Var(var_decl))) = module {
+                let decl: Option<&VarDeclarator> = var_decl.decls.get(0);
                 let is_single_decl = var_decl.decls.len() == 1;
-                let decl_expr = var_decl.decls.get(0);
-                if let Some(var_decl) = decl_expr {
-                    match &var_decl.name {
-                        Pat::Ident(ident) => {
-                            if is_single_decl {
-                                is_folded = self.fold_if_react_component(module, ident);
-                            }
-                        }
-                        _ => (),
+                if let Some(var_decl) = decl {
+                    if is_single_decl {
+                        is_folded = self.fold_var_declarator(module, var_decl);
                     }
                 }
             } else if let ModuleItem::Stmt(Stmt::Decl(Decl::Fn(fn_decl))) = module {
@@ -360,13 +379,8 @@ impl Fold for ReactRefreshRuntime {
                 if let Some(named_export) = module_decl.as_export_decl() {
                     match &named_export.decl {
                         Decl::Var(named_var_export) => {
-                            if let Some(named_var_ident) = named_var_export
-                                .decls
-                                .get(0)
-                                .and_then(|d| d.name.as_ident())
-                            {
-                                is_folded =
-                                    self.fold_if_react_component(module, &named_var_ident.id);
+                            for var_decl in named_var_export.decls.iter() {
+                                is_folded = self.fold_var_declarator(module, var_decl);
                             }
                         }
                         Decl::Fn(named_fn_export) => {
@@ -898,6 +912,117 @@ test!(
     "#
 );
 
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    builtin_hoc_fn_only,
+    // Input codes
+    r#"
+    const ForwardedComponent = forwardedRef(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    const ForwardedComponent = forwardedRef(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    global.$RefreshReg$(ForwardedComponent, "ForwardedComponent");
+    global.$RefreshRuntime$.getContext(ForwardedComponent).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    builtin_hoc_component_anonymous_with_named_export,
+    // Input codes
+    r#"
+    export const MemoComponentA = React.memo(() => {
+        return <div>{'Hello World'}</div>;
+    });
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    export const MemoComponentA = React.memo(()=>{
+        return <div>{'Hello World'}</div>;
+    });
+    global.$RefreshReg$(MemoComponentA, "MemoComponentA");
+    global.$RefreshRuntime$.getContext(MemoComponentA).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    builtin_hoc_ident_component_with_named_export,
+    // Input codes
+    r#"
+    export const MemoComponentB = React.memo(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    export const MemoComponentB = React.memo(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    global.$RefreshReg$(MemoComponentB, "MemoComponentB");
+    global.$RefreshRuntime$.getContext(MemoComponentB).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    builtin_hoc_fn_only_with_named_export,
+    // Input codes
+    r#"
+    export const ForwardedComponent = forwardedRef(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    export const ForwardedComponent = forwardedRef(function OriginComponent() {
+        return <div>{'Hello World'}</div>;
+    });
+    global.$RefreshReg$(ForwardedComponent, "ForwardedComponent");
+    global.$RefreshRuntime$.getContext(ForwardedComponent).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
 // External components
 test!(
     swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
@@ -1259,6 +1384,28 @@ test!(
     global.$RefreshRuntime$.getContext(MixedHooks).accept();
     global.$RefreshReg$ = __prevRefreshReg;
     global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+// Common
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| ReactRefreshRuntime::default(String::from("test")),
+    non_component,
+    // Input codes
+    r#"
+    const NAME = 'react-refresh';
+    export const TIMEOUT = 5000;
+    const styles = StyleSheet.create({});
+    "#,
+    // Output
+    r#"
+    const NAME = 'react-refresh';
+    export const TIMEOUT = 5000;
+    const styles = StyleSheet.create({});
     "#
 );
 
