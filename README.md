@@ -2,6 +2,8 @@
 
 Swc plugin implementation of [react-refresh/babel](https://www.npmjs.com/package/react-refresh)
 
+[![npm](https://img.shields.io/npm/v/swc-plugin-react-refresh?color=000000&style=flat-square)](https://www.npmjs.com/package/swc-plugin-react-refresh)
+
 > [!IMPORTANT]
 > A plugin for developing bundlers
 
