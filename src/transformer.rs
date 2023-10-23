@@ -1,7 +1,7 @@
 use crate::{
     utils::{
         arg_expr, assign_expr, bool_expr, call_expr, decl_var_and_assign_stmt, get_name_from_ident,
-        ident, ident_expr, ident_str_expr, is_react_component_name, obj_prop_expr, str_expr,
+        ident, ident_expr, ident_str_expr, is_componentish_name, obj_prop_expr, str_expr,
         to_stmt,
     },
     visitor,
@@ -179,7 +179,7 @@ impl ReactRefreshRuntime {
     fn fold_if_react_component(&mut self, module: &ModuleItem, ident: &Ident) -> bool {
         let component_name = get_name_from_ident(ident);
 
-        if !is_react_component_name(&component_name)
+        if is_componentish_name(&component_name)
             || !self.component_names.contains(&component_name)
             || self.black_list.contains(&component_name)
         {

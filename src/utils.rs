@@ -7,7 +7,7 @@ use swc_core::ecma::{ast::*, atoms::Atom};
 ///
 /// - MyComponent: `true`
 /// - myComponent: `false`
-pub fn is_react_component_name(name: &String) -> bool {
+pub fn is_componentish_name(name: &String) -> bool {
     name.chars().nth(0).unwrap().is_uppercase()
 }
 

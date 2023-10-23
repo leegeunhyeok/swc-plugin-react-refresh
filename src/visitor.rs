@@ -1,6 +1,6 @@
 #![cfg_attr(not(debug_assertions), allow(dead_code))]
 
-use crate::utils::{get_name_from_ident, is_react_component_name};
+use crate::utils::{get_name_from_ident, is_componentish_name};
 use std::collections::HashSet;
 use swc_core::ecma::{ast::*, visit::Visit};
 
@@ -35,13 +35,13 @@ impl Visit for IgnoreIdentifierCollector {
             match import_specifier {
                 ImportSpecifier::Named(named_import) => {
                     let identifier = get_name_from_ident(&named_import.local);
-                    if is_react_component_name(&identifier) {
+                    if is_componentish_name(&identifier) {
                         self.add(identifier);
                     }
                 }
                 ImportSpecifier::Default(default_import) => {
                     let identifier = get_name_from_ident(&default_import.local);
-                    if is_react_component_name(&identifier) {
+                    if is_componentish_name(&identifier) {
                         self.add(identifier);
                     }
                 }
@@ -53,7 +53,7 @@ impl Visit for IgnoreIdentifierCollector {
     fn visit_class_decl(&mut self, class_decl: &ClassDecl) {
         // Ignore class component
         let identifier = get_name_from_ident(&class_decl.ident);
-        if is_react_component_name(&identifier) {
+        if is_componentish_name(&identifier) {
             self.add(identifier);
         }
     }
