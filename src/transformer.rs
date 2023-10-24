@@ -202,10 +202,8 @@ impl ReactRefreshRuntime {
     ///
     /// Returns `true` when folded and otherwise returns `false`
     fn fold_var_declarator(&mut self, module: &ModuleItem, var_decl: &VarDeclarator) -> bool {
-        if let (Some(ident), Some(init_expr)) = (
-            var_decl.name.as_ident(),
-            var_decl.init.to_owned(),
-        ) {
+        if let (Some(ident), Some(init_expr)) = (var_decl.name.as_ident(), var_decl.init.to_owned())
+        {
             match *init_expr {
                 Expr::Fn(_) => {
                     return self.fold_if_react_component(module, ident);
@@ -391,7 +389,7 @@ impl Fold for ReactRefreshRuntime {
                         if let Some(fn_ident) = &fn_expr.ident {
                             is_folded = self.fold_if_react_component(module, fn_ident);
                         }
-                    } 
+                    }
                 }
             }
 
