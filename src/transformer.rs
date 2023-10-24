@@ -504,5 +504,29 @@ pub fn react_refresh(module_id: String) -> ReactRefreshRuntime {
 }
 
 #[cfg(test)]
-#[path = "./tests/unit.rs"]
-mod tests;
+#[path = "./tests/common.rs"]
+mod common;
+
+#[cfg(test)]
+#[path = "./tests/component-arrow.rs"]
+mod component_arrow;
+
+#[cfg(test)]
+#[path = "./tests/component-class.rs"]
+mod component_class;
+
+#[cfg(test)]
+#[path = "./tests/component-function.rs"]
+mod component_function;
+
+#[cfg(test)]
+#[path = "./tests/hoc.rs"]
+mod hoc;
+
+#[cfg(test)]
+#[path = "./tests/hooks.rs"]
+mod hooks;
+
+#[cfg(test)]
+#[path = "./tests/import.rs"]
+mod import;
