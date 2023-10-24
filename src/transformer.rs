@@ -78,30 +78,45 @@ impl ReactRefreshRuntimeComponent {
             .as_expr()
             .and_then(|expr_stmt| expr_stmt.expr.as_call())
         {
-            self.count_hook(call_expr);
+            self.find_hook(call_expr);
         } else if let Some(var_decl_stmt) = stmt.as_decl().and_then(|decl_stmt| decl_stmt.as_var())
         {
             for decl in var_decl_stmt.decls.iter() {
                 if let Some(call_expr) =
                     decl.init.as_ref().and_then(|init_expr| init_expr.as_call())
                 {
-                    self.count_hook(call_expr)
+                    self.find_hook(call_expr)
                 }
             }
         }
     }
 
-    fn count_hook(&mut self, call_expr: &CallExpr) {
+    /// Find hooks from call expression.
+    fn find_hook(&mut self, call_expr: &CallExpr) {
         if let Some(callee_expr) = call_expr.callee.as_expr() {
-            // Check if this expression is hook like a `React.useXXX()`.
-            if let Some(ident) = callee_expr.as_ident() {
-                let hook_name = ident.sym.to_string();
-                if BUILTIN_HOOKS.contains(&hook_name.as_str()) {
-                    self.builtin_hook_count += 1;
-                } else if hook_name.starts_with("use") {
-                    self.custom_hook_count += 1;
+            match *callee_expr.to_owned() {
+                // useXXX()
+                Expr::Ident(ident) => {
+                    self.count_hook(&ident);
                 }
+                // React.useXXX()
+                Expr::Member(member_expr) => {
+                    if let Some(ident) = &member_expr.prop.ident() {
+                        self.count_hook(ident);
+                    }
+                }
+                _ => (),
             }
+        }
+    }
+
+    /// Count hooks
+    fn count_hook(&mut self, ident: &Ident) {
+        let hook_name = ident.sym.to_string();
+        if BUILTIN_HOOKS.contains(&hook_name.as_str()) {
+            self.builtin_hook_count += 1;
+        } else if hook_name.starts_with("use") {
+            self.custom_hook_count += 1;
         }
     }
 }

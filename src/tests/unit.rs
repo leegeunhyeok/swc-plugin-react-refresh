@@ -903,6 +903,74 @@ test!(
     "#
 );
 
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| react_refresh(String::from("test")),
+    builtin_hook_from_member,
+    // Input codes
+    r#"
+    export function BuiltinMemberHook() {
+        const [number, setNumber] = React.useState(0);
+        return <div>{'Hello, World'}</div>;
+    }
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
+    var __s = global.$RefreshSig$();
+    export function BuiltinMemberHook() {
+        __s();
+        const [number, setNumber] = React.useState(0);
+        return <div>{'Hello, World'}</div>;
+    }
+    __s(BuiltinMemberHook, "test:BuiltinMemberHook", false);
+    global.$RefreshReg$(BuiltinMemberHook, "BuiltinMemberHook");
+    global.$RefreshRuntime$.getContext(BuiltinMemberHook).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
+test!(
+    swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
+        jsx: true,
+        ..Default::default()
+    }),
+    |_| react_refresh(String::from("test")),
+    custom_hook_from_member,
+    // Input codes
+    r#"
+    export function CustomMemberHook() {
+        const res = App.useCustomHook();
+        return <div>{'Hello, World'}</div>;
+    }
+    "#,
+    // Output
+    r#"
+    var __prevRefreshReg = global.$RefreshReg$;
+    var __prevRefreshSig = global.$RefreshSig$;
+    global.$RefreshReg$ = global.$RefreshRuntime$.getRegisterFunction();
+    global.$RefreshSig$ = global.$RefreshRuntime$.getCreateSignatureFunction();
+    var __s = global.$RefreshSig$();
+    export function CustomMemberHook() {
+        __s();
+        const res = App.useCustomHook();
+        return <div>{'Hello, World'}</div>;
+    }
+    __s(CustomMemberHook, "test:CustomMemberHook", true);
+    global.$RefreshReg$(CustomMemberHook, "CustomMemberHook");
+    global.$RefreshRuntime$.getContext(CustomMemberHook).accept();
+    global.$RefreshReg$ = __prevRefreshReg;
+    global.$RefreshSig$ = __prevRefreshSig;
+    "#
+);
+
 // Common
 test!(
     swc_ecma_parser::Syntax::Es(swc_ecma_parser::EsConfig {
