@@ -25,6 +25,8 @@ Swc plugin implementation of [react-refresh/babel](https://www.npmjs.com/package
 
 ## Setup
 
+Requirements: `>= @swc/core@1.3.81`
+
 ```bash
 npm install swc-plugin-react-refresh
 # or yarn
